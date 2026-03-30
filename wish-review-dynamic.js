@@ -46,23 +46,13 @@
   }
 
   /**
-   * 本页看板实际用到的行远少于全表：大量明细（分日、分渠道等）可丢弃，避免数据逐年膨胀时拖垮浏览器。
-   * 保留：① 汇总/汇总/全部（建专题列表）；② 当前累计·上线1–9日内·全部或「是」（详情 KPI）。
+   * 解析监测 CSV：
+   * - 为了展示“最新一期的完整复盘”，这里不再做看板用行的筛选瘦身；
+   * - 仍然会 normalize 行 key 并在后续逻辑中只使用所需的汇总/快照字段。
+   *
+   * 注意：数据量很大时浏览器内存/解析时间会显著上升。
    */
-  function isLaunchWindowWithin9DaysRow(r) {
-    if (val(r, '数据分类') !== '当前累计') return false;
-    const dr = val(r, '数据周期');
-    if (!/^上线\s*([1-9])\s*日内$/.test(dr)) return false;
-    const ut = val(r, '是否目标用户');
-    return ut === '全部' || ut === '是';
-  }
-
-  function isRowUsedByDashboard(r) {
-    return isSummaryAllRow(r) || isLaunchWindowWithin9DaysRow(r);
-  }
-
-  /** 流式解析：只把「看板用行」推入数组，避免 Papa 一次性生成百万行 objects */
-  function parseMonitoringCsvToSlimRows(text, logLabel) {
+  function parseMonitoringCsvToAllRows(text, logLabel) {
     const acc = [];
     const errs = [];
     Papa.parse(text, {
@@ -79,7 +69,6 @@
         const raw = results.data;
         if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return;
         const row = normalizeRowKeys(raw);
-        if (!isRowUsedByDashboard(row)) return;
         acc.push(row);
       },
       complete(results) {
@@ -590,55 +579,19 @@
     if (!latest) {
       return '<p class="review-mod-note">该专题无汇总期次数据。</p>';
     }
-    const nPast = periods.length - 1;
     const firstBoard = buildPeriodBoardArticle(latest);
-    const pastBoards =
-      state.showPastPeriodsExpanded && nPast > 0
-        ? periods
-            .slice(1)
-            .map((sr) => buildPeriodBoardArticle(sr))
-            .join('\n')
-        : '';
-
-    let pastBar = '';
-    if (nPast > 0) {
-      if (state.showPastPeriodsExpanded) {
-        pastBar =
-          '<div class="wishReviewPastPeriodsBar">' +
-          '<button type="button" class="btn btn--ghost wishReviewPastPeriodsBtn" data-wish-review-past="collapse">收起往期（仅保留最新一期）</button>' +
-          '</div>';
-      } else {
-        pastBar =
-          '<div class="wishReviewPastPeriodsBar">' +
-          '<p class="wishReviewPastPeriodsHint muted">默认仅展示<strong>最近上线</strong>的一期完整复盘（与列表「最新期」一致）。</p>' +
-          '<button type="button" class="btn wishReviewPastPeriodsBtn" data-wish-review-past="expand">加载往期完整复盘（另 ' +
-          esc(String(nPast)) +
-          ' 期）</button>' +
-          '</div>';
-      }
-    }
-
     return (
       '<div class="wishReviewFishRoot fish-report-embedded">' +
       '<p class="sub" style="margin:0 0 16px;line-height:1.55">' +
       '专题 <strong>' +
       esc(t.name) +
       '</strong> · <strong>版式与 fish-wish-review.html 一致</strong>。' +
-      (nPast > 0
-        ? ' 监测表内共 <strong>' +
-          esc(String(periods.length)) +
-          '</strong> 期；当前' +
-          (state.showPastPeriodsExpanded ? '已展开全部期次' : '仅详解最新一期') +
-          '。'
-        : ' 本专题仅 1 期。') +
+      ' 本页面仅展示<strong>最新一期</strong>。' +
       ' <strong>顶栏「预估30日」为线性外推</strong>；多模型 MAPE 与⑤ 长结论、④ 分层、同品类分位等仍依赖本地：<code>生成_人鱼全期结论表.py --topic ' +
       esc(t.name) +
       "'</code>。</p>" +
       '<div class="fish-period-stack">' +
       firstBoard +
-      '</div>' +
-      pastBar +
-      (pastBoards ? '<div class="fish-period-stack wishReviewPastStack">' + pastBoards + '</div>' : '') +
       '</div>'
     );
   }
@@ -738,7 +691,7 @@
       return;
     }
     if (status) {
-      status.textContent = '正在解析整体数据监测（流式瘦身，仅保留看板用行）…';
+      status.textContent = '正在解析整体数据监测（完整行解析，仅展示最新一期复盘）…';
     }
     const mainBlock = await readFn();
     if (!mainBlock.ok) {
@@ -760,11 +713,11 @@
       if (parts) {
         for (let pi = 0; pi < parts.length; pi++) {
           mergedRows = mergedRows.concat(
-            parseMonitoringCsvToSlimRows(parts[pi].text, parts[pi].name),
+            parseMonitoringCsvToAllRows(parts[pi].text, parts[pi].name),
           );
         }
       } else if (mainBlock.text) {
-        mergedRows = parseMonitoringCsvToSlimRows(
+        mergedRows = parseMonitoringCsvToAllRows(
           mainBlock.text,
           mainBlock.fileName || '监测表',
         );
