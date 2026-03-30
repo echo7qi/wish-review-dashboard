@@ -90,7 +90,7 @@ body[data-page="wish-review"] .wishReviewTopbar{
 }
 body[data-page="wish-review"] .wishReviewTopbar__brand{
   font-weight: 700;
-  font-size: 15px;
+  font-size: 13px;
   letter-spacing: 0.3px;
   padding: 8px 12px;
   border-radius: 10px;
@@ -107,7 +107,7 @@ body[data-page="wish-review"] .wishReviewTopbar__bind{
   min-width: 0;
 }
 body[data-page="wish-review"] .wishReviewTopbar__bindLabel{
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--muted);
@@ -119,14 +119,14 @@ body[data-page="wish-review"] .wishReviewTopbar__bind .btn{
   padding-left: 14px;
   padding-right: 14px;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 500;
 }
 body[data-page="wish-review"] .wishReviewTopbar__hint{
   margin: 0;
   flex: 1 1 220px;
   max-width: 100%;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1.45;
   padding: 8px 12px;
   border-radius: 10px;
@@ -144,10 +144,10 @@ body[data-page="wish-review"] .header{
   flex-shrink: 0;
 }
 body[data-page="wish-review"] .header h1{
-  font-size: 1.25rem;
+  font-size: calc(1.25rem - 2px);
 }
 body[data-page="wish-review"] .header__subtitle{
-  font-size: 0.9375rem;
+  font-size: calc(0.9375rem - 2px);
 }
 body[data-page="wish-review"] .reviewEmbedMain{
   flex: 1;
@@ -289,6 +289,34 @@ html:has(body[data-page="wish-review"]) {
   color: #315fe6;
   vertical-align: middle;
 }
+
+/* 工具栏与左侧专题列表较右侧复盘区小 2px（右侧 #wishReviewDetailInner 内 rem 不变） */
+body[data-page="wish-review"] .wishReviewDash__toolbar .wishReviewDash__search{
+  font-size: 14px;
+}
+body[data-page="wish-review"] .wishReviewDash__toolbar .wishReviewDash__status{
+  font-size: 13px;
+}
+body[data-page="wish-review"] .wishReviewDash__toolbar .wishReviewDash__source{
+  font-size: 12px;
+}
+body[data-page="wish-review"] .wishReviewDash__toolbar .btn{
+  font-size: 13px;
+}
+body[data-page="wish-review"] .wishReviewDash__col--list .wishReviewDash__h{
+  font-size: 13px;
+}
+body[data-page="wish-review"] .wishReviewDash__col--list .wishReviewDash__topicName{
+  font-size: 13px;
+}
+body[data-page="wish-review"] .wishReviewDash__col--list .wishReviewDash__topicSub{
+  font-size: 12px;
+}
+body[data-page="wish-review"] .wishReviewDash__col--list .wishReviewDash__badge{
+  font-size: 10px;
+  padding: 1px 5px;
+}
+
 .wishReviewDash__detail{
   overflow: visible;
   min-width: 0;
