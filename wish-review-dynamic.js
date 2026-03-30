@@ -1453,6 +1453,99 @@
     }
   }
 
+  /**
+   * 基于四张人群漏斗快照，与「全部用户」卡对比生成简短结论。
+   * @param {{ label: string, v: { target: number|null, reach: number|null, draw: number|null, pay: number|null } }[]} segmentData
+   */
+  function buildFunnelCrossSegmentInsightHtml(segmentData) {
+    const pick = (lab) => {
+      for (let i = 0; i < segmentData.length; i++) {
+        if (segmentData[i].label === lab) return segmentData[i].v;
+      }
+      return null;
+    };
+    const vAll = pick('全部用户');
+    const vNt = pick('非目标阅读用户');
+    const vRead = pick('目标阅读用户');
+    const vIp = pick('目标IP付费用户');
+
+    const ratioPayReach = (v) =>
+      v && v.reach != null && v.reach > 0 && v.pay != null && v.pay >= 0 ? v.pay / v.reach : null;
+    const ratioDrawReach = (v) =>
+      v && v.reach != null && v.reach > 0 && v.draw != null && v.draw >= 0 ? v.draw / v.reach : null;
+
+    const lines = [];
+    const payAll = vAll && vAll.pay != null && Number.isFinite(vAll.pay) ? vAll.pay : null;
+
+    if (payAll != null && payAll > 0 && vNt && vNt.pay != null && Number.isFinite(vNt.pay) && vNt.pay >= 0) {
+      const pct = (vNt.pay / payAll) * 100;
+      if (pct >= 52) {
+        lines.push(
+          '非目标阅读用户侧付费抽卡用户约占全量付费抽卡用户的 ' +
+            pct.toFixed(0) +
+            '%，泛曝光或非核心人群在付费人数上贡献明显，可结合投放 ROI 评估触达范围与转化策略。',
+        );
+      } else if (pct <= 28) {
+        lines.push(
+          '非目标阅读用户仅占全量付费抽卡用户约 ' +
+            pct.toFixed(0) +
+            '%，付费人数更依赖核心人群承接。',
+        );
+      }
+    }
+
+    const prAll = ratioPayReach(vAll);
+    const prRead = ratioPayReach(vRead);
+    if (prAll != null && prAll > 0 && prRead != null) {
+      if (prRead < prAll * 0.75) {
+        lines.push(
+          '目标阅读用户「触达→付费抽」转化率低于全量水平，建议核对人群与素材/活动匹配度，并检查触达后的付费引导链路。',
+        );
+      } else if (prRead > prAll * 1.1) {
+        lines.push('目标阅读用户触达后付费转化优于全量基准，核心阅读盘承接效率较好。');
+      }
+    }
+
+    const prIp = ratioPayReach(vIp);
+    if (prAll != null && prAll > 0 && prIp != null) {
+      if (prIp < prAll * 0.75) {
+        lines.push(
+          '目标 IP 付费用户触达后付费转化偏弱，可从 IP 吸引力、池子与定价权益侧复盘。',
+        );
+      } else if (prIp > prAll * 1.1) {
+        lines.push('目标 IP 付费用户触达后付费转化强于大盘，高意愿人群链路相对顺畅。');
+      }
+    }
+
+    const drAll = ratioDrawReach(vAll);
+    const drRead = ratioDrawReach(vRead);
+    if (drAll != null && drAll >= 0.05 && drRead != null) {
+      if (drRead < drAll * 0.82) {
+        lines.push(
+          '目标阅读用户「触达→抽卡」转化低于全量，可先排查触达内容、活动感知与进入抽卡页的引导是否到位。',
+        );
+      }
+    }
+
+    if (!lines.length) {
+      lines.push(
+        '漏斗已按同一快照窗口对齐；可将各人群「触达→抽卡→付费抽」逐级与「全部用户」卡对照，定位掉队环节并核对监测字段是否完整。',
+      );
+    }
+
+    const body = lines
+      .slice(0, 4)
+      .map((s) => '<li>' + esc(s) + '</li>')
+      .join('');
+    return (
+      '<div class="rv-funnelModule__insight" role="note">' +
+      '<div class="rv-funnelModule__insight-title">触达转化综合结论</div>' +
+      '<ul class="rv-funnelModule__insight-list">' +
+      body +
+      '</ul></div>'
+    );
+  }
+
   function buildUserReachFunnelsModuleHtml(sumRow) {
     const aid = val(sumRow, '活动标识');
     const daysRaw = toNum(val(sumRow, '已上线天数'));
@@ -1530,13 +1623,16 @@
       { label: '付费抽卡用户数', key: 'pay' },
     ];
 
-    const funnelCardsHtml = targets
-      .map((t) => {
-        const r =
-          String(t.label || '').trim() === '全部用户'
-            ? pickAllUsersFunnelRow()
-            : pickRowByCategory(t.label);
-        const v = stepValuesFromRow(r);
+    const segmentData = targets.map((t) => {
+      const r =
+        String(t.label || '').trim() === '全部用户'
+          ? pickAllUsersFunnelRow()
+          : pickRowByCategory(t.label);
+      return { label: t.label, v: stepValuesFromRow(r) };
+    });
+
+    const funnelCardsHtml = segmentData
+      .map(({ label, v }) => {
         const topForBar =
           v.target != null && v.target > 0
             ? v.target
@@ -1549,7 +1645,7 @@
         }
         return (
           `<div class="rv-funnelCard">` +
-          `<div class="rv-funnelCard__title">${esc(t.label)}</div>` +
+          `<div class="rv-funnelCard__title">${esc(label)}</div>` +
           `<div class="rv-funnel">` +
           stepsInner +
           `</div>` +
@@ -1558,11 +1654,23 @@
       })
       .join('\n');
 
+    const caliberHtml =
+      '<p class="rv-funnelModule__caliber">' +
+      esc(
+        '口径：数据分类「当前累计」，数据周期「' +
+          periodKey +
+          '」；四卡对应监测表「是否目标用户」（兼容列名「是否为目标用户」）下「全部 / 目标阅读 / 目标IP付费 / 非目标阅读」各行，与下图漏斗同快照。',
+      ) +
+      '</p>';
+
+    const insightHtml = buildFunnelCrossSegmentInsightHtml(segmentData);
+
     return (
       `<section class="review-mod rv-funnelModule">` +
       `<h3 class="review-mod-title"><span class="review-mod-badge">1</span>用户触达</h3>` +
+      insightHtml +
       `<div class="rv-funnel-grid">${funnelCardsHtml}</div>` +
-      '' +
+      caliberHtml +
       `</section>`
     );
   }

@@ -576,6 +576,39 @@
       margin-top: 0;
       margin-bottom: 12px;
     }
+    .rv-funnelModule__caliber {
+      margin: 14px 0 0;
+      font-size: 0.72rem;
+      color: #64748b;
+      line-height: 1.5;
+      max-width: 72rem;
+    }
+    .rv-funnelModule__insight {
+      margin: 6px 0 14px;
+      padding: 12px 14px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 0.78rem;
+      color: #334155;
+      line-height: 1.55;
+    }
+    .rv-funnelModule__insight-title {
+      font-weight: 700;
+      font-size: 0.8rem;
+      color: #1e293b;
+      margin: 0 0 8px;
+    }
+    .rv-funnelModule__insight-list {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .rv-funnelModule__insight-list li {
+      margin-bottom: 6px;
+    }
+    .rv-funnelModule__insight-list li:last-child {
+      margin-bottom: 0;
+    }
     .rv-funnel-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
