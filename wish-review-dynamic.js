@@ -1505,18 +1505,35 @@
       buildUserReachFunnelsModuleHtml._cache.set(cKey, snapRows);
     }
 
+    function targetUserLabelFromRow(r) {
+      return String(
+        valFuzzy(r, ['是否目标用户', '是否为目标用户']) || '',
+      ).trim();
+    }
+
     const isTargetValues = Array.from(
-      new Set(snapRows.map((r) => val(r, '是否目标用户')).filter(Boolean)),
+      new Set(snapRows.map((r) => targetUserLabelFromRow(r)).filter(Boolean)),
     );
 
     const pickRowByCategory = (categoryLabel) => {
       const resolved = resolveIsTargetUserCategoryValue(isTargetValues, categoryLabel);
       if (!resolved) return null;
       for (let i = 0; i < snapRows.length; i++) {
-        if (val(snapRows[i], '是否目标用户') === resolved) return snapRows[i];
+        if (targetUserLabelFromRow(snapRows[i]) === resolved) return snapRows[i];
       }
       return null;
     };
+
+    /** 「全部用户」漏斗：触达等指标须与监测表「是否目标用户=全部」的当前累计快照行一致，避免模糊匹配到其它人群行 */
+    function pickAllUsersFunnelRow() {
+      for (let wi = 0; wi < 2; wi++) {
+        const want = wi === 0 ? '全部' : '全部用户';
+        for (let i = 0; i < snapRows.length; i++) {
+          if (targetUserLabelFromRow(snapRows[i]) === want) return snapRows[i];
+        }
+      }
+      return pickRowByCategory('全部用户');
+    }
 
     const targets = [
       { label: '全部用户' },
@@ -1543,7 +1560,10 @@
 
     const funnelCardsHtml = targets
       .map((t) => {
-        const r = pickRowByCategory(t.label);
+        const r =
+          String(t.label || '').trim() === '全部用户'
+            ? pickAllUsersFunnelRow()
+            : pickRowByCategory(t.label);
         const v = stepValuesFromRow(r);
         const topForBar =
           v.target != null && v.target > 0
