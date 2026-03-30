@@ -32,6 +32,21 @@
     return String(v).trim();
   }
 
+  /** 监测表「大盘/全量」行：是否目标用户=全部/全部用户，或目标用户类型=整体 */
+  function aggregateTargetUserLabel(r) {
+    return String(
+      val(r, '是否目标用户') ||
+        val(r, '是否为目标用户') ||
+        val(r, '目标用户类型') ||
+        '',
+    ).trim();
+  }
+
+  function isAggregateTargetUserRow(r) {
+    const u = aggregateTargetUserLabel(r);
+    return u === '全部' || u === '全部用户' || u === '整体';
+  }
+
   /** 单行：去掉表头 BOM、列名首尾空白 */
   function normalizeRowKeys(r) {
     if (!r || typeof r !== 'object') return {};
@@ -61,9 +76,13 @@
     if (val(r, '数据分类') !== '当前累计') return false;
     const dp = String(val(r, '数据周期') || '').trim();
     const m = dp.match(/^上线(\d+)日内$/);
-    if (!m) return false;
-    const n = parseInt(m[1], 10);
-    return n >= 1 && n <= MONITOR_SNAP_DAY_MAX;
+    if (m) {
+      const n = parseInt(m[1], 10);
+      return n >= 1 && n <= MONITOR_SNAP_DAY_MAX;
+    }
+    // 顶栏「累计触达用户数」依赖「当前累计·上线至今类·全量」行；此前仅保留上线 n 日内会导致该行从未入内存
+    if (isLaunchToDateDataPeriod(dp) && isAggregateTargetUserRow(r)) return true;
+    return false;
   }
 
   /**
@@ -110,7 +129,12 @@
       val(r, '活动标识'),
       val(r, '数据分类'),
       val(r, '数据周期'),
-      val(r, '是否目标用户'),
+      String(
+        val(r, '是否目标用户') ||
+          val(r, '是否为目标用户') ||
+          val(r, '目标用户类型') ||
+          '',
+      ).trim(),
     ].join('\x01');
   }
 
@@ -423,8 +447,8 @@
       if (val(r, '活动标识') !== aidNorm || val(r, '数据分类') !== '当前累计' || val(r, '数据周期') !== key) {
         continue;
       }
-      if (val(r, '是否目标用户') === '全部') allRow = r;
-      if (val(r, '是否目标用户') === '是') yesRow = r;
+      if (isAggregateTargetUserRow(r)) allRow = r;
+      if (aggregateTargetUserLabel(r) === '是') yesRow = r;
     }
     return { pa: allRow, pyes: yesRow, n };
   }
@@ -442,7 +466,7 @@
     const c = Object.create(null);
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (val(r, '数据分类') !== '当前累计' || val(r, '是否目标用户') !== '全部') continue;
+      if (val(r, '数据分类') !== '当前累计' || !isAggregateTargetUserRow(r)) continue;
       const aid = val(r, '活动标识');
       const per = val(r, '数据周期');
       if (!aid || !per) continue;
@@ -1017,21 +1041,60 @@
     );
   }
 
-  function poolStackHtml(giftR, ticketR) {
-    const g = Math.max(0, Math.min(1, giftR));
-    const tk = Math.max(0, Math.min(1, ticketR));
-    let rest = 1 - g - tk;
-    if (rest < 0) rest = 0;
-    return (
-      '<div class="rv-stack-bar" title="礼包 / 祈愿券 / 其余收入占比">' +
-      `<span class="rv-stack-s rv-stack-g" style="width:${(g * 100).toFixed(2)}%">礼</span>` +
-      `<span class="rv-stack-s rv-stack-t" style="width:${(tk * 100).toFixed(2)}%">券</span>` +
-      `<span class="rv-stack-s rv-stack-o" style="width:${(rest * 100).toFixed(2)}%">其</span>` +
-      '</div>' +
-      `<p class="rv-stack-cap">收入结构 · 礼包 ${(g * 100).toFixed(0)}% · 祈愿券 ${(tk * 100).toFixed(
-        0,
-      )}% · 其余 ${(rest * 100).toFixed(0)}%</p>`
+  const INCOME_STRUCTURE_DENY_KEYS = new Set(['对应人群收入占比']);
+
+  /** 收入结构：监测表中带「贡献收入占比」的列，按表头原文逐行展示（不合并为礼/券/其余） */
+  function collectIncomeStructurePairs(pa) {
+    if (!pa || typeof pa !== 'object') return [];
+    const out = [];
+    const keys = Object.keys(pa);
+    for (let i = 0; i < keys.length; i++) {
+      const k = String(keys[i] || '')
+        .replace(/^\uFEFF/, '')
+        .trim();
+      if (!k || INCOME_STRUCTURE_DENY_KEYS.has(k)) continue;
+      if (!/贡献收入占比$/.test(k)) continue;
+      const raw = pa[keys[i]];
+      if (raw == null || String(raw).trim() === '') continue;
+      const r = rate01(raw);
+      if (r == null || !Number.isFinite(r)) continue;
+      out.push({ key: k, pct: r });
+    }
+    out.sort((a, b) => a.key.localeCompare(b.key, 'zh-Hans-CN'));
+    return out;
+  }
+
+  function incomeStructureBlockHtml(pairs) {
+    if (!pairs.length) {
+      return (
+        '<p class="review-mod-note">监测表未匹配到「…贡献收入占比」类字段，无法展示收入结构。</p>'
+      );
+    }
+    const rows = pairs.map(
+      (p) =>
+        '<tr><th scope="row" class="rv-income-structure-field">' +
+        esc(p.key) +
+        '</th><td class="rv-income-structure-pct">' +
+        esc(fmtPct(p.pct)) +
+        '</td></tr>',
     );
+    return (
+      '<div class="rv-income-structure-wrap">' +
+      '<table class="rv-income-structure-table">' +
+      '<tbody>' +
+      rows.join('') +
+      '</tbody></table>' +
+      '</div>'
+    );
+  }
+
+  function maxIncomeContributionShare(pairs) {
+    let m = null;
+    for (let i = 0; i < pairs.length; i++) {
+      const p = pairs[i].pct;
+      if (p != null && Number.isFinite(p) && (m == null || p > m)) m = p;
+    }
+    return m;
   }
 
   /** 预估30日 = n 日累计 × 30/n，进度 = 累计/预估（线性外推） */
@@ -1047,7 +1110,7 @@
     return { est, progressPct };
   }
 
-  function oneLinerText(pa, nSnap) {
+  function oneLinerText(pa, nSnap, genreRaw, revForRank) {
     if (!pa) {
       return (
         '未匹配到「当前累计·上线' +
@@ -1068,6 +1131,26 @@
       );
     }
     if (t != null) bits.push('目标触达率约 ' + (t * 100).toFixed(1) + '%');
+    const catPr =
+      revForRank != null &&
+      Number.isFinite(revForRank) &&
+      revForRank > 0
+        ? percentileRankSameGenre(revForRank, genreRaw)
+        : null;
+    if (catPr != null) {
+      const g0 = genreRaw != null ? String(genreRaw).trim() : '';
+      if (g0 && g0 !== '—') {
+        bits.push(
+          '在所属「' +
+            esc(g0) +
+            '」品类中，同期收入约超 ' +
+            catPr.toFixed(0) +
+            '% 样本',
+        );
+      } else {
+        bits.push('在所属品类中，同期收入约超 ' + catPr.toFixed(0) + '% 样本');
+      }
+    }
     if (!bits.length) return '—';
     return bits.join('；') + '。';
   }
@@ -1130,6 +1213,140 @@
     );
   }
 
+  /**
+   * 给业务的下一步策略：可执行向建议，与「④ 综合判断」互补；规则与快照指标挂钩。
+   * @param {object|null} pa 当前累计·表内 n 日·全量快照行
+   * @param {{
+   *   join: number|null,
+   *   tgt: number|null,
+   *   freeShare: number|null,
+   *   goalPct: number|null,
+   *   catPr: number|null,
+   *   tgtUserShare: number|null,
+   *   maxContributionShare: number|null,
+   *   repeatR: number|null,
+   *   n: number,
+   *   usedScript30: boolean,
+   *   scriptProgressPct: number|null,
+   *   linearProgressPct: number|null,
+   * }} ctx
+   */
+  function buildBusinessNextStrategyHtml(pa, ctx) {
+    if (!pa) {
+      return (
+        '<section class="period-next-strategy period-next-strategy--empty">' +
+        '<h3 class="period-next-strategy__title"><span class="period-next-strategy__badge">⑥</span>给业务的下一步策略</h3>' +
+        '<p class="review-mod-note">当前无快照数据，无法生成策略建议。</p>' +
+        '</section>'
+      );
+    }
+    const join = ctx.join;
+    const tgt = ctx.tgt;
+    const freeShare = ctx.freeShare;
+    const goalPct = ctx.goalPct;
+    const catPr = ctx.catPr;
+    const tgtUserShare = ctx.tgtUserShare;
+    const maxContributionShare = ctx.maxContributionShare;
+    const repeatR = ctx.repeatR;
+    const usedScript30 = ctx.usedScript30;
+    const scriptProgressPct = ctx.scriptProgressPct;
+    const linearProgressPct = ctx.linearProgressPct;
+
+    const items = [];
+
+    if (join != null && join < 0.12) {
+      items.push(
+        '优先组织一轮「付费动线」排查：梳理礼包/券档位、首抽引导与付费入口曝光，并对齐宣发落地页与活动内链路，小流量验证后再扩量。',
+      );
+    } else if (join != null && join < 0.18) {
+      items.push(
+        '围绕参与付费率做可控实验：尝试调整付费入口位置、券感知强度与免费→付费过渡文案，并按天看漏斗拐点。',
+      );
+    }
+
+    if (tgt != null && tgt < 0.12) {
+      items.push(
+        '目标触达率偏低时，建议评估渠道扩容、提醒/推送节奏与素材迭代，并核对目标用户池口径是否与投放一致。',
+      );
+    } else if (tgt != null && tgt < 0.2) {
+      items.push(
+        '触达仍有抬升空间：可补充定向曝光或档期内的二次触达，并结合②宣发与触达模块看渠道效率。',
+      );
+    }
+
+    if (freeShare != null && freeShare > 0.55 && join != null && join < 0.18) {
+      items.push(
+        '免费抽占比较高且付费转化一般：可收紧赠抽节奏或增设付费试抽锚点，避免用户长期停留在免费层。',
+      );
+    }
+
+    if (goalPct != null && goalPct < 75) {
+      items.push(
+        '收入目标达成度偏紧：建议集中资源在高付费意愿人群（礼包组合、限时加码），并明确剩余窗口内的日销与库存节奏。',
+      );
+    } else if (goalPct != null && goalPct >= 95) {
+      items.push(
+        '目标达成度较好：重点转为维稳与长尾收割——控制成本、保留收官物料与客服/社区预案。',
+      );
+    }
+
+    if (catPr != null && catPr < 35) {
+      items.push(
+        '同品类分位偏低：对标近期同类活动的中奖池结构、定价与宣发打法，列出 2～3 项可复用改动做灰度。',
+      );
+    } else if (catPr != null && catPr >= 72) {
+      items.push(
+        '同品类表现靠前：把本期有效的池型、礼包结构与素材沉淀进 playbook，供后续同类专题快速复用。',
+      );
+    }
+
+    if (tgtUserShare != null && tgtUserShare < 0.32) {
+      items.push(
+        '目标用户收入占比偏低：复盘人群定向与内容匹配，必要时收缩泛曝光、加大核心盘承接资源。',
+      );
+    } else if (tgtUserShare != null && tgtUserShare > 0.68) {
+      items.push(
+        '收入高度集中在目标用户：巩固核心盘的同时，关注非目标盘的体验与舆情，避免过度牺牲广度。',
+      );
+    }
+
+    if (maxContributionShare != null && maxContributionShare > 0.82) {
+      items.push(
+        '收入结构单项占比较高：可测试各收入来源配比，降低单一来源波动风险。',
+      );
+    }
+
+    if (repeatR != null && repeatR < 0.12 && join != null && join >= 0.15) {
+      items.push(
+        '复抽率偏弱：可设计阶梯奖励、每日任务或卡池更新节奏，提升已付费用户的持续抽取意愿。',
+      );
+    }
+
+    const prog =
+      usedScript30 && scriptProgressPct != null ? scriptProgressPct : linearProgressPct;
+    if (prog != null && prog >= 88 && prog < 100 && goalPct != null && goalPct < 90) {
+      items.push(
+        '预估进度接近收官：锁定剩余活动日的排期与库存，避免券/礼包断档或峰值时段缺少预案。',
+      );
+    }
+
+    if (!items.length) {
+      items.push(
+        '当前快照未触发强规则信号：建议按周会节奏跟踪 KPI，并为礼包、触达与分层各保留 1～2 个可控实验位，便于快速迭代。',
+      );
+    }
+
+    return (
+      '<section class="period-next-strategy" aria-label="给业务的下一步策略">' +
+      '<h3 class="period-next-strategy__title"><span class="period-next-strategy__badge">⑥</span>给业务的下一步策略</h3>' +
+      '<p class="period-next-strategy__hint">以下为基于本期监测数据的启发式建议，执行前请结合活动阶段、预算与合规要求评审。</p>' +
+      '<ol class="period-next-strategy__list">' +
+      items.map((t) => '<li>' + esc(t) + '</li>').join('') +
+      '</ol>' +
+      '</section>'
+    );
+  }
+
   /** 同一专题内，按活动标识在 periods（期次降序）中取紧邻的上一期汇总行 */
   function findPrevPeriodSummaryRow(sumRow) {
     const topicName = val(sumRow, '专题名称');
@@ -1157,6 +1374,63 @@
     }
     const n = parseFloat(t);
     return Number.isFinite(n) ? n : null;
+  }
+
+  function isAllTargetUserKpiRow(r) {
+    return isAggregateTargetUserRow(r);
+  }
+
+  /** 数据周期是否为「上线至今」类（排除「上线n日内」快照行） */
+  function isLaunchToDateDataPeriod(dp) {
+    const s = String(dp || '').trim();
+    if (!s) return false;
+    if (/^上线\d+日内$/.test(s)) return false;
+    if (s === '上线至今' || s === '上线至今累计' || s === '至今累计') return true;
+    if (s.indexOf('上线至今') >= 0) return true;
+    return false;
+  }
+
+  /**
+   * 累计触达用户数：优先全量人群行（是否目标用户=全部/全部用户，或目标用户类型=整体）且「数据周期」为上线至今类；
+   * 其次读快照行上的「上线至今触达用户数」「累计触达uv」等列；再无则回退为表内「上线n日内」全量行触达（与漏斗一致）。
+   */
+  function findCumulativeReachTuvAllUsers(rows, aid, pa) {
+    const aidNorm = String(aid || '').trim();
+    if (pa) {
+      const direct = toNum(
+        valFuzzy(pa, [
+          '上线至今触达用户数',
+          '上线至今累计触达用户数',
+          '累计触达用户数',
+          '累计触达uv',
+          '累计触达UV',
+        ]),
+      );
+      if (direct != null && Number.isFinite(direct)) return direct;
+    }
+    if (rows && rows.length && aidNorm) {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (val(r, '活动标识') !== aidNorm) continue;
+        if (val(r, '数据分类') !== '当前累计') continue;
+        if (!isAllTargetUserKpiRow(r)) continue;
+        if (!isLaunchToDateDataPeriod(val(r, '数据周期'))) continue;
+        const v = toNum(
+          valFuzzy(r, [
+            '累计触达uv',
+            '累计触达UV',
+            '触达用户数',
+            '触达UV',
+          ]),
+        );
+        if (v != null && Number.isFinite(v)) return v;
+      }
+    }
+    if (pa)
+      return toNum(
+        valFuzzy(pa, ['累计触达uv', '累计触达UV', '触达用户数', '触达UV']),
+      );
+    return null;
   }
 
   /** 与本期 KPI 同口径：当前累计·上线 n 日内·全部 + 预估 30 日数值（用于环比） */
@@ -1204,6 +1478,8 @@
       est30Num = Math.round(linearEst.est);
     }
 
+    const cumReachTuv = findCumulativeReachTuvAllUsers(state.rows, aid, pa);
+
     return {
       rev,
       join,
@@ -1212,6 +1488,7 @@
       arppu,
       goalPct,
       est30Num,
+      cumReachTuv,
     };
   }
 
@@ -1458,16 +1735,17 @@
     }
     const repeatR = pa ? rate01(val(pa, '复抽率')) : null;
 
-    const giftR = pa ? rate01(val(pa, '金爱心礼包贡献收入占比')) : null;
-    const ticketR = pa ? rate01(val(pa, '付费祈愿券贡献收入占比')) : null;
-    const poolBlock =
-      giftR != null && ticketR != null
-        ? poolStackHtml(giftR, ticketR)
-        : '<p class="review-mod-note">缺少金爱心礼包/付费祈愿券收入占比列时无法绘制堆叠条。</p>';
+    const incomeStructurePairs = pa ? collectIncomeStructurePairs(pa) : [];
+    const poolBlock = incomeStructureBlockHtml(incomeStructurePairs);
+    const maxContributionShare = maxIncomeContributionShare(incomeStructurePairs);
 
     const tgt = pa ? rate01(val(pa, '目标触达率')) : null;
     const tdr = pa ? rate01(val(pa, '触达抽卡率')) : null;
-    const tuv = pa ? toNum(val(pa, '触达用户数')) : null;
+    const tuv = pa
+      ? toNum(
+          valFuzzy(pa, ['累计触达uv', '累计触达UV', '触达用户数', '触达UV']),
+        )
+      : null;
     const tarpu = pa ? toNum(val(pa, '触达ARPU')) : null;
     let launchRows = '';
     if (tgt != null) launchRows += hbarHtml('目标触达率', tgt, fmtPct(tgt), '#0891b2');
@@ -1555,6 +1833,8 @@
     const yoyPaid = prevKpi ? yoyPercentSpanHtml(prevKpi.paidUv, paidUv) : '';
     const yoyPpd = prevKpi ? yoyPercentSpanHtml(prevKpi.ppd, ppd) : '';
     const yoyArppu = prevKpi ? yoyPercentSpanHtml(prevKpi.arppu, arppu) : '';
+    const cumReachTuv = findCumulativeReachTuvAllUsers(state.rows, aid, pa);
+    const yoyCumReach = prevKpi ? yoyPercentSpanHtml(prevKpi.cumReachTuv, cumReachTuv) : '';
 
     const catPr =
       rev != null && Number.isFinite(rev) && rev > 0
@@ -1566,6 +1846,9 @@
           <div class="kpi-pill"><span class="kpi-l">${n}日累计收入</span><strong>${fmtInt(rev)}${yoyRev}</strong></div>
           <div class="kpi-pill kpi-pill-goal"><span class="kpi-l">预估30日收入</span><strong>${est30Strong}${yoyEst}</strong></div>
           <div class="kpi-pill kpi-pill-goal"><span class="kpi-l">收入目标达成度</span><strong>${goalHtml}${yoyGoal}</strong></div>
+          <div class="kpi-pill"><span class="kpi-l">累计触达用户数</span><strong>${
+            cumReachTuv != null && Number.isFinite(cumReachTuv) ? fmtInt(cumReachTuv) : '—'
+          }${yoyCumReach}</strong></div>
           <div class="kpi-pill"><span class="kpi-l">参与付费率</span><strong>${join != null ? fmtPct(join) : '—'}${yoyJoin}</strong></div>
           <div class="kpi-pill"><span class="kpi-l">付费抽卡人数</span><strong>${fmtInt(paidUv)}${yoyPaid}</strong></div>
           <div class="kpi-pill"><span class="kpi-l">付费抽人均抽数</span><strong>${ppd != null ? ppd.toFixed(2) : '—'}${yoyPpd}</strong></div>
@@ -1623,13 +1906,23 @@
       '<section class="mini-card" aria-label="结构">' +
       '<h4 class="mini-card-title">结构</h4>' +
       '' +
-      '<div class="mini-stats"><div class="data-line">目标用户收入占比 <strong>' +
+      '<div class="mini-stats">' +
+      '<div class="data-line">目标用户收入占比 <strong>' +
       (tgtUserShare != null ? fmtPct(tgtUserShare) : '—') +
-      '</strong>｜礼包 <strong>' +
-      (giftR != null ? fmtPct(giftR) : '—') +
-      '</strong>｜祈愿券 <strong>' +
-      (ticketR != null ? fmtPct(ticketR) : '—') +
-      '</strong></div></div>' +
+      '</strong></div>' +
+      (incomeStructurePairs.length
+        ? incomeStructurePairs
+            .map(
+              (p) =>
+                '<div class="data-line"><span class="mini-structure-field">' +
+                esc(p.key) +
+                '</span> <strong>' +
+                esc(fmtPct(p.pct)) +
+                '</strong></div>',
+            )
+            .join('')
+        : '<div class="data-line">贡献收入占比（表字段）<strong>—</strong></div>') +
+      '</div>' +
       '' +
       '</section>' +
       '<section class="mini-card" aria-label="收入节奏">' +
@@ -1669,6 +1962,22 @@
       '</section>' +
       '</div>';
 
+    const strategyCtx = {
+      join,
+      tgt,
+      freeShare,
+      goalPct: goalPctCurr,
+      catPr,
+      tgtUserShare,
+      maxContributionShare,
+      repeatR,
+      n,
+      usedScript30,
+      scriptProgressPct,
+      linearProgressPct: linearEst.progressPct,
+    };
+    const nextStrategyHtml = buildBusinessNextStrategyHtml(pa, strategyCtx);
+
     return (
       `<article class="period-board" data-period="${esc(String(pNo))}">` +
       '<header class="period-head">' +
@@ -1678,7 +1987,7 @@
       `<span class="period-sub">${esc(genre)} · 已上线 ${esc(daysOnline)} 天 · 表内对比 ${esc(String(n))} 日</span>` +
       '</div>' +
       '<p class="period-one-liner"><span class="one-liner-label">一句话总结</span>' +
-      oneLinerText(pa, n) +
+      oneLinerText(pa, n, genre, rev) +
       '</p>' +
       kpiBlock +
       '</header>' +
@@ -1715,6 +2024,7 @@
       '' +
       miniGrid +
       '</details>' +
+      nextStrategyHtml +
       '</article>'
     );
   }
@@ -1768,7 +2078,7 @@
   function resolveIsTargetUserCategoryValue(isTargetUserValues, categoryLabel) {
     const normalized = String(categoryLabel || '').trim();
     const candidates = [];
-    if (normalized.includes('全部')) candidates.push('全部', '全部用户');
+    if (normalized.includes('全部')) candidates.push('全部', '全部用户', '整体');
     if (normalized.includes('目标阅读')) candidates.push('目标阅读用户', '目标阅读', '阅读用户', '阅读');
     if (normalized.includes('目标IP付费')) candidates.push('目标IP付费用户', 'IP付费用户', 'IP付费', '付费IP');
     if (normalized.includes('非目标阅读')) candidates.push('非目标阅读用户', '非目标阅读', '非阅读用户', '非阅读');
@@ -1921,7 +2231,7 @@
 
     function targetUserLabelFromRow(r) {
       return String(
-        valFuzzy(r, ['是否目标用户', '是否为目标用户']) || '',
+        valFuzzy(r, ['是否目标用户', '是否为目标用户', '目标用户类型']) || '',
       ).trim();
     }
 
@@ -1938,10 +2248,11 @@
       return null;
     };
 
-    /** 「全部用户」漏斗：触达等指标须与监测表「是否目标用户=全部」的当前累计快照行一致，避免模糊匹配到其它人群行 */
+    /** 「全部用户」漏斗：与监测表全量行一致（是否目标用户=全部/全部用户，或目标用户类型=整体） */
     function pickAllUsersFunnelRow() {
-      for (let wi = 0; wi < 2; wi++) {
-        const want = wi === 0 ? '全部' : '全部用户';
+      const wants = ['全部', '全部用户', '整体'];
+      for (let wi = 0; wi < wants.length; wi++) {
+        const want = wants[wi];
         for (let i = 0; i < snapRows.length; i++) {
           if (targetUserLabelFromRow(snapRows[i]) === want) return snapRows[i];
         }
@@ -1959,7 +2270,14 @@
     function stepValuesFromRow(row) {
       if (!row) return { target: null, reach: null, draw: null, pay: null };
       const target = toNum(valFuzzy(row, ['目标用户数', '目标用户']));
-      const reach = toNum(valFuzzy(row, ['触达用户数', '触达UV']));
+      const reach = toNum(
+        valFuzzy(row, [
+          '累计触达uv',
+          '累计触达UV',
+          '触达用户数',
+          '触达UV',
+        ]),
+      );
       const draw = toNum(valFuzzy(row, ['抽卡用户数', '抽卡用户']));
       const pay = toNum(valFuzzy(row, ['付费抽卡用户数', '付费抽卡用户']));
       return { target, reach, draw, pay };
@@ -2008,7 +2326,7 @@
       esc(
         '口径：数据分类「当前累计」，数据周期「' +
           periodKey +
-          '」；四卡对应监测表「是否目标用户」（兼容列名「是否为目标用户」）下「全部 / 目标阅读 / 目标IP付费 / 非目标阅读」各行，与下图漏斗同快照。',
+          '」；四卡对应监测表「是否目标用户 / 是否为目标用户 / 目标用户类型」下「全部·全部用户·整体 / 目标阅读 / 目标IP付费 / 非目标阅读」各行，与下图漏斗同快照。',
       ) +
       '</p>';
 

@@ -68,14 +68,27 @@ body.is-embed .grid{
   gap: 10px;
 }
 
-/* 祈愿单项目复盘：视口内布局 + 主区动态看板可滚动 */
+/* 祈愿单项目复盘：独立页高度随内容（避免短内容下大块留白）；iframe 嵌入见 .is-embed 覆盖 */
+html:has(body[data-page="wish-review"]:not(.is-embed)) {
+  height: auto;
+}
+body[data-page="wish-review"]:not(.is-embed) {
+  height: auto;
+  min-height: 0;
+}
 body[data-page="wish-review"] .appShell{
+  align-items: stretch;
+  grid-template-columns: 1fr;
+}
+body[data-page="wish-review"]:not(.is-embed) .appShell {
+  min-height: 0;
+  height: auto;
+}
+body[data-page="wish-review"].is-embed .appShell {
   min-height: 100vh;
   min-height: 100dvh;
   height: 100vh;
   height: 100dvh;
-  align-items: stretch;
-  grid-template-columns: 1fr;
 }
 body[data-page="wish-review"] .wishReviewTopbar{
   flex-shrink: 0;
@@ -138,6 +151,11 @@ body[data-page="wish-review"] .appShell__content--wishReview{
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+}
+body[data-page="wish-review"]:not(.is-embed) .appShell__content--wishReview {
+  overflow: visible;
+}
+body[data-page="wish-review"].is-embed .appShell__content--wishReview {
   overflow: hidden;
 }
 body[data-page="wish-review"] .header{
@@ -150,18 +168,29 @@ body[data-page="wish-review"] .header__subtitle{
   font-size: calc(0.9375rem - 2px);
 }
 body[data-page="wish-review"] .reviewEmbedMain{
-  flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   margin: 0;
   padding: 0 14px 14px;
   width: 100%;
 }
+body[data-page="wish-review"]:not(.is-embed) .reviewEmbedMain {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+body[data-page="wish-review"].is-embed .reviewEmbedMain {
+  flex: 1;
+  min-height: 0;
+}
 body[data-page="wish-review"] .reviewEmbedMain--dynamic{
-  overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+}
+body[data-page="wish-review"]:not(.is-embed) .reviewEmbedMain--dynamic {
+  overflow-y: visible;
+}
+body[data-page="wish-review"].is-embed .reviewEmbedMain--dynamic {
+  overflow-y: auto;
 }
 body[data-page="wish-review"] .reviewEmbed{
   flex: 1;
@@ -432,6 +461,15 @@ body[data-page="wish-review"].is-embed .reviewEmbedMain--dynamic{
 body[data-page="wish-review"].is-embed .appShell__content--wishReview{
   height: 100vh;
   height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+body[data-page="wish-review"].is-embed {
+  height: 100%;
+  min-height: 100%;
+}
+html:has(body[data-page="wish-review"].is-embed) {
+  height: 100%;
 }
 body[data-page="wish-review"].is-embed .reviewEmbed{
   border: 0;
