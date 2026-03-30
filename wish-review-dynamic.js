@@ -3,6 +3,12 @@
 (function () {
   const $ = (id) => document.getElementById(id);
 
+  /**
+   * 监测表「当前累计·上线 n 日内」允许的 n 上限（解析与快照匹配共用，挡异常行）。
+   * 各期实际 n 取自该期「已上线天数」取整，与表内周期列一致。
+   */
+  const MONITOR_SNAP_DAY_MAX = 3660;
+
   function esc(s) {
     if (s == null || s === '') return '';
     return String(s)
@@ -48,7 +54,7 @@
   /**
    * 大表瘦身：只保留专题列表与复盘用到的行，避免百万行明细把 Chrome 撑爆（错误代码 5 ≈ OOM）。
    * - 汇总行：汇总 / 汇总 / 全部
-   * - 快照行：当前累计 + 数据周期「上线1日内」…「上线9日内」（与 snapRowN 一致）
+   * - 快照行：当前累计 + 数据周期「上线n日内」（n 与各行「已上线天数」口径一致，解析时仅做上限防护）
    */
   function isDashboardUsefulRow(r) {
     if (isSummaryAllRow(r)) return true;
@@ -57,7 +63,7 @@
     const m = dp.match(/^上线(\d+)日内$/);
     if (!m) return false;
     const n = parseInt(m[1], 10);
-    return n >= 1 && n <= 9;
+    return n >= 1 && n <= MONITOR_SNAP_DAY_MAX;
   }
 
   /**
@@ -157,9 +163,10 @@
   }
 
   function snapRowN(rows, aid, maxDays) {
-    let md = parseInt(String(maxDays), 10);
-    if (Number.isNaN(md)) md = 9;
-    const n = Math.min(9, Math.max(1, md));
+    const mdRaw = Number(maxDays);
+    let md = Math.floor(mdRaw);
+    if (!Number.isFinite(mdRaw) || Number.isNaN(md) || md < 1) md = 1;
+    const n = Math.min(MONITOR_SNAP_DAY_MAX, md);
     return snapAll(rows, aid, n);
   }
 
@@ -405,7 +412,7 @@
     const pNo = periodNum(sumRow);
     const aid = val(sumRow, '活动标识');
     const daysRaw = toNum(val(sumRow, '已上线天数'));
-    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 9;
+    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 1;
     const snap = snapRowN(state.rows, aid, daysInt);
     const pa = snap.pa;
     const pyes = snap.pyes;
@@ -515,7 +522,7 @@
       '日累计收入 <strong>' +
       fmtInt(rev) +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">n=min(9, 该期「已上线天数」取整)，与复盘卡片表内对比口径一致。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">n 取该期「已上线天数」向下取整，与监测表「当前累计·上线 n 日内」一致。</div></details>' +
       '</section>' +
       '<section class="mini-card" aria-label="触达效率">' +
       '<h4 class="mini-card-title">触达效率</h4>' +
@@ -578,10 +585,12 @@
       '<section class="mini-card" aria-label="同品类表现">' +
       '<h4 class="mini-card-title">同品类表现</h4>' +
       '<p class="mini-con">浏览器未加载对标池 CSV</p>' +
-      '<div class="mini-stats"><div class="data-line">9日收入分位 <strong>—</strong>｜参与付费率 <strong>' +
+      '<div class="mini-stats"><div class="data-line">同期' +
+      esc(String(n)) +
+      '日收入分位 <strong>—</strong>｜参与付费率 <strong>' +
       (join != null ? fmtPct(join) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">9 日收入分位等需合并对标池 CSV 后计算，当前未载入故显示为「—」。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">同期 n 日收入分位需合并对标池 CSV 后计算，当前未载入故显示为「—」。</div></details>' +
       '</section>' +
       '</div>';
 
@@ -722,7 +731,7 @@
   function buildUserReachFunnelsModuleHtml(sumRow) {
     const aid = val(sumRow, '活动标识');
     const daysRaw = toNum(val(sumRow, '已上线天数'));
-    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 9;
+    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 1;
     const snap = snapRowN(state.rows, aid, daysInt);
     const n = snap.n;
     const periodKey = `上线${n}日内`;
@@ -843,7 +852,7 @@
       (periods.length > 1
         ? '；另有 <strong>' + esc(String(periods.length - 1)) + '</strong> 期请在下方折叠区展开查看。'
         : '。') +
-      ' 大表已自动<strong>仅保留汇总行与上线 1–9 日内快照</strong>以降低崩溃风险。' +
+      ' 大表已自动<strong>仅保留汇总行与「当前累计·上线 n 日内」快照</strong>（n 与表内一致，并设合理上限）以降低崩溃风险。' +
       ' 顶栏「预估30日」为线性外推。</p>' +
       '<div class="fish-period-stack">' +
       latestBoard +
@@ -947,7 +956,7 @@
       return;
     }
     if (status) {
-      status.textContent = '正在解析整体数据监测（仅保留汇总与 1–9 日快照行，降低内存）…';
+      status.textContent = '正在解析整体数据监测（仅保留汇总与「上线 n 日内」快照行，降低内存）…';
     }
     const mainBlock = await readFn();
     if (!mainBlock.ok) {
