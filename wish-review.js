@@ -28,6 +28,18 @@ async function resolveReviewRootFromBoundRoot(rootHandle) {
   if (rootName && REVIEW_ROOT_CANDIDATES.includes(rootName)) {
     return { handle: rootHandle, name: rootName };
   }
+  // Fallback: if the bound directory already contains "整体数据监测" directly,
+  // treat it as the review root (user may bind "祈愿收入复盘" itself).
+  try {
+    if (BUNDLE_SUBS?.main?.length) {
+      for (const mainSubName of BUNDLE_SUBS.main) {
+        const h = await rootHandle.getDirectoryHandle(mainSubName, { create: false });
+        if (h) return { handle: rootHandle, name: rootName || '祈愿收入复盘' };
+      }
+    }
+  } catch (_) {
+    // ignore and continue
+  }
   return resolveFirstChildDir(rootHandle, REVIEW_ROOT_CANDIDATES);
 }
 
