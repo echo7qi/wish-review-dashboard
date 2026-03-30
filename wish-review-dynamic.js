@@ -1061,7 +1061,7 @@
     return bits.join('；') + '。';
   }
 
-  /** ⑤ 综合判断：基于当前快照可计算的指标生成要点，不依赖外部 HTML。 */
+  /** 综合判断：基于当前快照可计算的指标生成要点，不依赖外部 HTML。 */
   function buildSynthesisModuleHtml(pa, pyes, synthCtx) {
     if (!pa) {
       return (
@@ -1084,7 +1084,7 @@
     const tgtUserShare = pyes ? rate01(val(pyes, '对应人群收入占比')) : null;
     if (join != null) {
       if (join < 0.12) {
-        items.push('参与付费率偏低，可结合礼包/券结构（②）与触达（③）排查转化断点。');
+        items.push('参与付费率偏低，可结合礼包/券结构（①）与触达（②）排查转化断点。');
       } else if (join < 0.18) {
         items.push('参与付费率中等略偏低，关注免费抽占比与进付费抽引导。');
       } else {
@@ -1092,7 +1092,7 @@
       }
     }
     if (tgt != null) {
-      items.push('目标触达率约 ' + (tgt * 100).toFixed(1) + '%，可对照宣发与渠道效率（③）。');
+      items.push('目标触达率约 ' + (tgt * 100).toFixed(1) + '%，可对照宣发与渠道效率（②）。');
     }
     if (freeShare != null && freeShare > 0.55 && join != null && join < 0.18) {
       items.push('纯免费抽占比较高且付费转化一般时，建议复盘赠抽与付费入口设计。');
@@ -1140,14 +1140,6 @@
       if (fd != null && du != null && du > 0) freeShare = fd / du;
     }
     const repeatR = pa ? rate01(val(pa, '复抽率')) : null;
-
-    let payRows = '';
-    if (join != null) payRows += hbarHtml('参与付费率', join, fmtPct(join), '#0d9488');
-    if (freeShare != null) payRows += hbarHtml('纯免费抽占抽卡用户', freeShare, fmtPct(freeShare), '#ca8a04');
-    if (repeatR != null) payRows += hbarHtml('复抽率', repeatR, fmtPct(repeatR), '#6366f1');
-    if (!payRows) {
-      payRows = '<p class="review-mod-note">本快照行缺少参与付费率/抽卡用户数等字段时无法绘制条形。</p>';
-    }
 
     const giftR = pa ? rate01(val(pa, '金爱心礼包贡献收入占比')) : null;
     const ticketR = pa ? rate01(val(pa, '付费祈愿券贡献收入占比')) : null;
@@ -1250,7 +1242,6 @@
     const topShare = pa ? rate01(val(pa, '抽到最高等级用户占比')) : null;
     const tgtUserShare = pyes ? rate01(val(pyes, '对应人群收入占比')) : null;
 
-    const payOl = '';
     const poolOl = '';
     const launchOl = '';
 
@@ -1360,27 +1351,22 @@
       buildUserReachFunnelsModuleHtml(sumRow) +
       '<div class="review-mod-grid">' +
       '<section class="review-mod">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">①</span> 付费表现</h3>' +
-      payRows +
-      payOl +
-      '</section>' +
-      '<section class="review-mod">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">②</span> 抽池策略与收入结构</h3>' +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">①</span> 抽池策略与收入结构</h3>' +
       poolBlock +
       poolOl +
       '</section>' +
       '<section class="review-mod">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">③</span> 宣发与触达</h3>' +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">②</span> 宣发与触达</h3>' +
       launchRows +
       launchOl +
       '</section>' +
       '</div>' +
       '<section class="review-mod review-mod--layer">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 付费分层表现</h3>' +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">③</span> 付费分层表现</h3>' +
       buildLayerModuleHtml(sumRow, state.layerIndex, n, pNo) +
       '</section>' +
       '<section class="review-mod review-mod--synthesis">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">⑤</span> 综合判断（跨维度）</h3>' +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 综合判断（跨维度）</h3>' +
       buildSynthesisModuleHtml(pa, pyes, {
         linearEst,
         usedScript30,
@@ -1390,7 +1376,7 @@
       '</section>' +
       '</div>' +
       '<details class="period-metrics-fold">' +
-      '<summary class="period-metrics-fold-sum">展开 / 收起 ⑥ 六格指标明细</summary>' +
+      '<summary class="period-metrics-fold-sum">展开 / 收起 ⑤ 六格指标明细</summary>' +
       '' +
       miniGrid +
       '</details>' +
