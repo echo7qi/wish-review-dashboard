@@ -17,15 +17,11 @@
             <button type="button" class="btn js-wish-review-bind">绑定数据文件夹</button>
             <button type="button" class="btn btn--ghost js-wish-review-scan">扫描数据源</button>
           </div>
-          <p class="wishReviewTopbar__hint muted">数据在浏览器本地解析，不上传。</p>
         </div>
 
         <header class="header">
           <div class="header__title">
             <h1>祈愿单项目复盘</h1>
-            <div class="header__subtitle">
-              右侧展示：基于绑定目录内监测 CSV 在浏览器内生成专题下全部期次复盘（不读取本地静态 HTML）。
-            </div>
           </div>
         </header>
 
@@ -40,8 +36,8 @@
                 autocomplete="off"
               />
               <button type="button" class="btn" id="wishReviewReloadBtn">重新加载监测数据</button>
-              <span id="wishReviewDashStatus" class="wishReviewDash__status muted"></span>
-              <span id="wishReviewDashSource" class="wishReviewDash__source muted"></span>
+              <span id="wishReviewDashStatus" class="wishReviewDash__status muted" hidden></span>
+              <span id="wishReviewDashSource" class="wishReviewDash__source muted" hidden></span>
             </div>
 
             <div class="wishReviewDash__grid">
@@ -74,8 +70,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-    <script src="./wish-review.js?v=20260330j"></script>
-    <script src="./wish-review-dynamic.js?v=20260330k"></script>
+    <script src="./wish-review.js?v=20260330l"></script>
+    <script src="./wish-review-dynamic.js?v=20260330l"></script>
   </body>
 </html>
 

@@ -621,54 +621,6 @@
     return (100 * lo) / vals.length;
   }
 
-  function buildCalibNoteHtml(calibration, genreLabel) {
-    const benchLabel = '对标池';
-    const subj = esc(genreLabel || '本品类');
-    if (!calibration || !calibration.bt || !calibration.bt.length) {
-      return (
-        '<p class="exec-calib-note">' +
-        subj +
-        ' 在监测数据中尚无「已上线≥30 天且 9 日/30 日收入齐全」的满月样本；30 日预估使用<strong>监测往期与' +
-        benchLabel +
-        '</strong>混合 k 外推（与脚本无样本时一致）。</p>'
-      );
-    }
-    const wk = calibration.winner;
-    const metaW = calibration.rows[wk];
-    const mm = metaW && metaW.mape;
-    const lines = [];
-    const keys = Object.keys(calibration.rows).sort();
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      const meta = calibration.rows[k];
-      const m = meta.mape;
-      if (!m || m.mean == null) continue;
-      const mark = k === wk ? '★ ' : '';
-      lines.push(
-        mark +
-          esc(meta.label) +
-          ' — MAPE ' +
-          m.mean.toFixed(1) +
-          '% · MdAPE ' +
-          m.md.toFixed(1) +
-          '%',
-      );
-    }
-    const table = lines.join('<br />');
-    const head =
-      '<p class="exec-calib-note"><strong>30 日收入预估</strong>已用监测内<strong>同品类往期</strong>真实 30 日累计做留一法回测，并对标<strong>整体数据监测同夹池表</strong>的 R30/R9；' +
-      '满月可评样本 <strong>' +
-      calibration.bt.length +
-      '</strong> 期，选用 MAPE 最低：<strong>' +
-      esc(calibration.rows[wk].label) +
-      '</strong>（MAPE ' +
-      (mm && mm.mean != null ? mm.mean.toFixed(1) : '—') +
-      '%）。<br />' +
-      table +
-      '</p>';
-    return head;
-  }
-
   /**
    * 与脚本一致：只认「汇总 / 汇总 / 全部」汇总行；同一专题下同一活动标识只保留一行（取期次更大者），
    * 避免导出重复行把「期数」和「专题数」撑大。
@@ -834,7 +786,7 @@
     return { est, progressPct };
   }
 
-  function oneLinerText(pa, nSnap, catPr, usedScript30) {
+  function oneLinerText(pa, nSnap, catPr) {
     if (!pa) {
       return (
         '未匹配到「当前累计·上线' +
@@ -855,18 +807,10 @@
       );
     }
     if (t != null) bits.push('目标触达率约 ' + (t * 100).toFixed(1) + '%');
-    if (usedScript30) {
-      bits.push(
-        '顶栏「预估30日」与静态页一致：同品类往期留一法比 MAPE 选模型，并混入整体数据监测同夹对标池的 R30/R9。',
-      );
-    } else {
-      bits.push(
-        '30 日预估当前为线性外推（同品类满月可评样本或 9 日/30 日快照不足时）；保证监测内有「上线满 30 天」活动且存在 上线9日/30日 收入列后可启用多模型。',
-      );
-    }
     if (catPr != null) {
-      bits.push('同期累计收入在同品类样本（监测往期 + 同夹池表）中约超 ' + catPr.toFixed(0) + '% 的活动。');
+      bits.push('同期累计收入约超同品类 ' + catPr.toFixed(0) + '% 样本。');
     }
+    if (!bits.length) return '—';
     return bits.join('；') + '。';
   }
 
@@ -880,7 +824,6 @@
       );
     }
     const linearEst = synthCtx.linearEst;
-    const usedScript30 = synthCtx.usedScript30;
     const scriptProgressPct = synthCtx.scriptProgressPct;
     const catPr = synthCtx.catPr;
 
@@ -911,27 +854,17 @@
       items.push('目标用户收入占比约 ' + (tgtUserShare * 100).toFixed(1) + '%（「是否目标用户=是」行）。');
     }
     const progShow =
-      usedScript30 && scriptProgressPct != null ? scriptProgressPct : linearEst.progressPct;
+      synthCtx.usedScript30 && scriptProgressPct != null
+        ? scriptProgressPct
+        : linearEst.progressPct;
     if (progShow != null && progShow >= 90) {
       items.push(
-        (usedScript30 ? '多模型预估' : '线性外推') +
-          '进度约 ' +
-          progShow +
-          '%，可结合「收入目标达成度」评估是否接近收尾节奏。',
+        '预估完成进度约 ' + progShow + '%，可结合「收入目标达成度」评估收尾节奏。',
       );
     }
     if (catPr != null) {
-      items.push(
-        '同期收入在同品类横向样本中约超 ' +
-          catPr.toFixed(0) +
-          '% 的活动（样本 = 监测内同品类往期 + 整体数据监测同夹对标池）。',
-      );
-    } else if (!state.benchRows.length) {
-      items.push(
-        '未检测到同夹对标池 CSV 时，分位与池侧 R30/R9 仅用监测表内同品类；可将池表放入「整体数据监测」文件夹。',
-      );
+      items.push('同期收入约超同品类 ' + catPr.toFixed(0) + '% 样本。');
     }
-    items.push('分层条形全文、作品明细曝光等仍依赖额外子目录 CSV，本页未合并载入。');
     return (
       '<ol class="review-conclusions">' +
       items.map((li) => '<li>' + esc(li) + '</li>').join('') +
@@ -1000,8 +933,7 @@
     const ppd = pa ? toNum(val(pa, '付费抽用户-人均付费抽数')) : null;
     const arppu = pa ? toNum(val(pa, '触达付费ARPPU')) : null;
     const goalCell = val(pa, '目标达成度');
-    const goalHtml =
-      goalCell !== '' ? esc(goalCell) : '—<span class="kpi-level">（未录入）</span>';
+    const goalHtml = goalCell !== '' ? esc(goalCell) : '—';
 
     const nModel = Math.min(9, Math.max(1, daysInt));
     const snapM = snapRowN(state.rows, aid, nModel);
@@ -1034,8 +966,7 @@
       pred30v,
     );
     if (formattedScript) {
-      est30Strong =
-        formattedScript + '<span class="kpi-level">（与静态页同源多模型）</span>';
+      est30Strong = formattedScript;
       usedScript30 = true;
       if (pred30v != null && pred30v > 0) {
         let dProg = parseInt(String(daysInt), 10);
@@ -1046,19 +977,15 @@
         scriptProgressPct = Math.round((rWin / pred30v) * 100);
       }
     } else if (linearEst.est != null && linearEst.progressPct != null) {
-      est30Strong = `${fmtInt(linearEst.est)} · 进度${linearEst.progressPct}%<span class="kpi-level">（线性外推）</span>`;
+      est30Strong = `${fmtInt(linearEst.est)} · 进度${linearEst.progressPct}%`;
     } else {
-      est30Strong = '—<span class="kpi-level">（缺快照或预测条件）</span>';
+      est30Strong = '—';
     }
 
     const catPr =
       rev != null && Number.isFinite(rev) && rev > 0
         ? percentileRankSameGenre(rev, genre)
         : null;
-    const calibBlock =
-      pa && pack
-        ? buildCalibNoteHtml(pack.calibration, genre === '—' ? '本品类' : genre)
-        : '';
 
     const kpiBlock = pa
       ? `<div class="period-kpis">
@@ -1069,46 +996,32 @@
           <div class="kpi-pill"><span class="kpi-l">付费抽卡人数</span><strong>${fmtInt(paidUv)}</strong></div>
           <div class="kpi-pill"><span class="kpi-l">付费抽人均抽数</span><strong>${ppd != null ? ppd.toFixed(2) : '—'}</strong></div>
           <div class="kpi-pill"><span class="kpi-l">付费ARPPU</span><strong>${arppu != null ? arppu.toFixed(2) : '—'}</strong></div>
-        </div>${calibBlock}`
+        </div>`
       : '<p class="review-mod-note">无当前累计快照，顶栏 KPI 略。</p>';
 
     const pps = pa ? toNum(val(pa, '付费单抽均价')) : null;
     const topShare = pa ? rate01(val(pa, '抽到最高等级用户占比')) : null;
     const tgtUserShare = pyes ? rate01(val(pyes, '对应人群收入占比')) : null;
 
-    const payOl =
-      '<ol class="review-conclusions">' +
-      '<li>条形数据与监测表「当前累计·上线' +
-      esc(String(n)) +
-      '日内·全部」快照行一致。</li>' +
-      '<li>若参与付费率与纯免费抽占比同向偏弱，可结合赠抽与进付费抽引导复盘。</li>' +
-      '</ol>';
-    const poolOl =
-      '<ol class="review-conclusions">' +
-      '<li>礼包、祈愿券与其余收入占比由堆叠条展示；阈值与话术可结合业务口径在表外补充。</li>' +
-      '</ol>';
-    const launchOl =
-      '<ol class="review-conclusions">' +
-      '<li>触达类指标来自同一快照；宣发曝光与 pCTR 等需作品明细表字段，当前看板未合并载入。</li>' +
-      '</ol>';
+    const payOl = '';
+    const poolOl = '';
+    const launchOl = '';
 
     const miniGrid =
       '<div class="period-grid">' +
       '<section class="mini-card" aria-label="收入规模">' +
       '<h4 class="mini-card-title">收入规模</h4>' +
-      '<p class="mini-con">表内对比 ' +
-      esc(String(n)) +
-      ' 日·当前累计</p>' +
+      '' +
       '<div class="mini-stats"><div class="data-line">' +
       esc(String(n)) +
       '日累计收入 <strong>' +
       fmtInt(rev) +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">n = min(30, 该期「已上线天数」向下取整)，与监测表「当前累计·上线 n 日内」一致。</div></details>' +
+      '' +
       '</section>' +
       '<section class="mini-card" aria-label="触达效率">' +
       '<h4 class="mini-card-title">触达效率</h4>' +
-      '<p class="mini-con">来自监测表同快照</p>' +
+      '' +
       '<div class="mini-stats"><div class="data-line">触达 UV <strong>' +
       fmtInt(tuv) +
       '</strong>｜触达 ARPU <strong>' +
@@ -1116,11 +1029,11 @@
       '</strong>｜目标触达率 <strong>' +
       (tgt != null ? fmtPct(tgt) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">触达 UV、ARPU、目标触达率等同监测表该快照行。</div></details>' +
+      '' +
       '</section>' +
       '<section class="mini-card" aria-label="客单价">' +
       '<h4 class="mini-card-title">客单价</h4>' +
-      '<p class="mini-con">付费与抽次结构</p>' +
+      '' +
       '<div class="mini-stats"><div class="data-line">付费单抽均价 <strong>' +
       (pps != null ? pps.toFixed(2) : '—') +
       '</strong>｜参与付费率 <strong>' +
@@ -1132,11 +1045,11 @@
       '</strong>｜顶配用户占比 <strong>' +
       (topShare != null ? fmtPct(topShare) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">顶配用户占比列名：抽到最高等级用户占比。</div></details>' +
+      '' +
       '</section>' +
       '<section class="mini-card" aria-label="结构">' +
       '<h4 class="mini-card-title">结构</h4>' +
-      '<p class="mini-con">目标用户收入占比（「是」行）</p>' +
+      '' +
       '<div class="mini-stats"><div class="data-line">目标用户收入占比 <strong>' +
       (tgtUserShare != null ? fmtPct(tgtUserShare) : '—') +
       '</strong>｜礼包 <strong>' +
@@ -1144,20 +1057,20 @@
       '</strong>｜祈愿券 <strong>' +
       (ticketR != null ? fmtPct(ticketR) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">目标用户收入占比为「是否目标用户=是」行的对应人群收入占比。</div></details>' +
+      '' +
       '</section>' +
       '<section class="mini-card" aria-label="收入节奏">' +
       '<h4 class="mini-card-title">收入节奏</h4>' +
-      '<p class="mini-con">同期累计 + 30 日预估（多模型或线性）</p>' +
+      '' +
       '<div class="mini-stats"><div class="data-line">同期' +
       esc(String(n)) +
       '日累计收入 <strong>' +
       fmtInt(rev) +
       '</strong></div>' +
       (pred30v != null && pred30v > 0
-        ? '<div class="data-line">多模型预估 30 日累计 <strong>' +
+        ? '<div class="data-line">预估 30 日累计 <strong>' +
           fmtInt(Math.round(pred30v)) +
-          '</strong>（与生成脚本留一法一致）</div>'
+          '</strong></div>'
         : '') +
       (linearEst.est != null && !(pred30v != null && pred30v > 0)
         ? '<div class="data-line">线性预估 30 日累计 <strong>' +
@@ -1167,15 +1080,11 @@
           '%</strong></div>'
         : '') +
       '</div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">多模型时基线为「上线 min(9,已上线天数) 日内」收入 × 校准 k；进度分子为 min(30,已上线天数) 日内累计。线性兜底为 n 日累计 ÷ n × 30。</div></details>' +
+      '' +
       '</section>' +
       '<section class="mini-card" aria-label="同品类表现">' +
       '<h4 class="mini-card-title">同品类表现</h4>' +
-      '<p class="mini-con">' +
-      (state.benchRows.length
-        ? '监测同品类往期 + 同夹对标池'
-        : '监测内同品类往期（无同夹池表）') +
-      '</p>' +
+      '' +
       '<div class="mini-stats"><div class="data-line">同期' +
       esc(String(n)) +
       '日收入分位 <strong>' +
@@ -1183,7 +1092,7 @@
       '</strong>｜参与付费率 <strong>' +
       (join != null ? fmtPct(join) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">分位：同「品类」下各活动 n=min(30,自身已上线天数取整)，取「当前累计·上线 n 日内·全部」收入排序（监测 + 同夹池表去重）。</div></details>' +
+      '' +
       '</section>' +
       '</div>';
 
@@ -1196,12 +1105,11 @@
       `<span class="period-sub">${esc(genre)} · 已上线 ${esc(daysOnline)} 天 · 表内对比 ${esc(String(n))} 日</span>` +
       '</div>' +
       '<p class="period-one-liner"><span class="one-liner-label">一句话总结</span>' +
-      oneLinerText(pa, n, catPr, usedScript30) +
+      oneLinerText(pa, n, catPr) +
       '</p>' +
       kpiBlock +
       '</header>' +
       '<div class="review-modules">' +
-      '<p class="review-mod-note">阅读顺序：模块1（用户触达）→①②③④⑤；⑥ 为下方折叠区。</p>' +
       buildUserReachFunnelsModuleHtml(sumRow) +
       '<div class="review-mod-grid">' +
       '<section class="review-mod">' +
@@ -1222,7 +1130,7 @@
       '</div>' +
       '<section class="review-mod review-mod--layer">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 付费分层表现</h3>' +
-      '<p class="review-mod-note">「分层用户监测」CSV 未合并载入本页（控内存与性能）。需要分层条形时可在后续版本扩展读取该子目录。</p>' +
+      '<p class="review-mod-note">分层监测数据未载入。</p>' +
       '</section>' +
       '<section class="review-mod review-mod--synthesis">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">⑤</span> 综合判断（跨维度）</h3>' +
@@ -1236,7 +1144,7 @@
       '</div>' +
       '<details class="period-metrics-fold">' +
       '<summary class="period-metrics-fold-sum">展开 / 收起 ⑥ 六格指标明细</summary>' +
-      '<p class="review-grid-hint">以下为 <strong>⑥</strong> 六格摘要；30 日预估优先为与静态页一致的多模型留一法，否则为线性外推。</p>' +
+      '' +
       miniGrid +
       '</details>' +
       '</article>'
@@ -1415,9 +1323,7 @@
       `<section class="review-mod rv-funnelModule">` +
       `<h3 class="review-mod-title"><span class="review-mod-badge">1</span>用户触达</h3>` +
       `<div class="rv-funnel-grid">${funnelCardsHtml}</div>` +
-      `<p class="review-mod-note">四个漏斗分别基于监测表「是否目标用户」列筛选：${esc(
-        targets.map((x) => x.label).join(' / '),
-      )}。</p>` +
+      '' +
       `</section>`
     );
   }
@@ -1435,7 +1341,7 @@
         '<details class="wish-past-periods fish-past-periods-details">' +
         '<summary class="wish-past-periods__sum">历史期次（' +
         esc(String(nPast)) +
-        ' 期）— 点击展开加载，减轻内存与卡顿</summary>' +
+        '）</summary>' +
         '<div class="fish-period-stack wish-past-periods__host" data-topic="' +
         esc(t.name) +
         '"></div>' +
@@ -1443,15 +1349,6 @@
     }
     return (
       '<div class="wishReviewFishRoot fish-report-embedded">' +
-      '<p class="sub" style="margin:0 0 16px;line-height:1.55">' +
-      '专题 <strong>' +
-      esc(t.name) +
-      '</strong> · 监测 CSV 在浏览器内生成复盘（默认展示<strong>最新一期</strong>）' +
-      (periods.length > 1
-        ? '；另有 <strong>' + esc(String(periods.length - 1)) + '</strong> 期请在下方折叠区展开查看。'
-        : '。') +
-      ' 大表已自动<strong>仅保留汇总行与「当前累计·上线 1–30 日内」快照</strong>（含 9/30 日等用于多模型与分位）。' +
-      ' 顶栏「预估30日」与静态页一致：<strong>同品类往期留一法</strong>并混入<strong>整体数据监测同夹对标池</strong> R30/R9。</p>' +
       '<div class="fish-period-stack">' +
       latestBoard +
       '</div>' +
@@ -1566,17 +1463,30 @@
     const readMainOnly = window.wishReviewReadMonitorCsv;
     const readFn = typeof readBundle === 'function' ? readBundle : readMainOnly;
     if (!readFn) {
-      if (status) status.textContent = '脚本未就绪。';
+      if (status) {
+        status.hidden = false;
+        status.textContent = '脚本未就绪。';
+      }
       return;
     }
     if (status) {
-      status.textContent =
-        '正在解析整体数据监测（监测表 + 同夹对标池；仅保留汇总与上线 1–30 日内快照）…';
+      status.hidden = false;
+      status.textContent = '加载中…';
+    }
+    if (src) {
+      src.hidden = false;
+      src.textContent = '';
     }
     const raw = await readFn();
     if (!raw.ok) {
-      if (status) status.textContent = raw.error || '读取失败';
-      if (src) src.textContent = '';
+      if (status) {
+        status.hidden = false;
+        status.textContent = raw.error || '读取失败';
+      }
+      if (src) {
+        src.hidden = true;
+        src.textContent = '';
+      }
       state.rows = [];
       state.benchRows = [];
       state.mergedRows = [];
@@ -1619,6 +1529,7 @@
         mergedRows = one.rows;
       } else {
         if (status) {
+          status.hidden = false;
           status.textContent = '读取结果缺少 CSV 内容，请刷新页面后重试。';
         }
         return;
@@ -1633,7 +1544,10 @@
         csvKeptBeforeDedupe += benchKept;
       }
     } catch (e) {
-      if (status) status.textContent = 'CSV 解析失败';
+      if (status) {
+        status.hidden = false;
+        status.textContent = 'CSV 解析失败';
+      }
       return;
     }
 
@@ -1659,8 +1573,7 @@
         layerRowCount: 0,
         workRowCount: 0,
         loadedAt: Date.now(),
-        note:
-          '30 日预估与分位：监测同品类往期 + 整体数据监测同夹对标池；与生成脚本口径一致（留一法选模型）。',
+        note: '',
       };
     }
     const built = buildTopicModels(state.rows);
@@ -1670,40 +1583,13 @@
     state.fileNames =
       mainBlock.fileNames ||
       (parts ? parts.map((p) => p.name) : mainBlock.fileName ? [mainBlock.fileName] : []);
-    const mtime = new Date(lastMod || 0).toLocaleString('zh-CN', { hour12: false });
-    const nFiles = parts ? parts.length : 1;
-    const benchHint =
-      state.benchRows.length > 0
-        ? `；已合并对标池 ${state.benchRows.length} 行`
-        : '；未检测到同夹对标池 CSV（分位/池 R30/R9 仅用监测内同品类）';
     if (status) {
-      const n = (x) => (x != null ? Math.round(x).toLocaleString('zh-CN') : '0');
-      const scanHint =
-        csvScannedTotal > 0
-          ? ` · CSV 扫描 ${n(csvScannedTotal)} 行 → 规则保留 ${n(csvKeptBeforeDedupe)} → 监测去重 ${n(state.rows.length)}`
-          : '';
-      status.textContent =
-        (nFiles > 1
-          ? `已合并 ${nFiles} 个监测 CSV → ${state.rows.length} 行（去重后）`
-          : `已加载监测 ${state.rows.length} 行`) +
-        scanHint +
-        benchHint +
-        ` · ${built.topicCount} 个专题 · ${built.activityDedupCount} 个祈愿活动` +
-        `（汇总·全部 原始 ${built.rawSummaryCount} 行）` +
-        ' · 右侧默认最新一期';
+      status.textContent = '';
+      status.hidden = true;
     }
     if (src) {
-      const mainLabel =
-        mainBlock.fileNames && mainBlock.fileNames.length
-          ? mainBlock.fileNames.join(' + ')
-          : mainBlock.fileName || (parts && parts.map((p) => p.name).join(' + ')) || '—';
-      const benchLabel =
-        isBundle && raw.bench && raw.bench.fileNames && raw.bench.fileNames.length
-          ? raw.bench.fileNames.join(' + ')
-          : '';
-      src.textContent = benchLabel
-        ? `监测：${mainLabel}｜对标池：${benchLabel} · ${mtime}`
-        : `${mainLabel} · ${mtime}`;
+      src.textContent = '';
+      src.hidden = true;
     }
 
     // Cache mtime for auto refresh.
