@@ -1240,6 +1240,118 @@
   }
 
   /**
+   * 综合结论：根据参与付费率、触达、目标达成度、同品类分位等信号生成 1～2 段总述，置于要点列表之上。
+   */
+  function buildComprehensiveVerdictHtml(pa, pyes, synthCtx) {
+    if (!pa) return '';
+    const join = rate01(val(pa, '参与付费率'));
+    const tgt = rate01(val(pa, '目标触达率'));
+    const goalPct = parseGoalPercentCell(val(pa, '目标达成度'));
+    const catPr = synthCtx.catPr;
+    const linearEst = synthCtx.linearEst;
+    const scriptProgressPct = synthCtx.scriptProgressPct;
+    const progShow =
+      synthCtx.usedScript30 && scriptProgressPct != null
+        ? scriptProgressPct
+        : linearEst.progressPct;
+
+    let freeShare = null;
+    const fd = toNum(val(pa, '免费抽卡用户数'));
+    const du = toNum(val(pa, '抽卡用户数'));
+    if (fd != null && du != null && du > 0) freeShare = fd / du;
+
+    const tgtUserShare = pyes ? rate01(val(pyes, '对应人群收入占比')) : null;
+
+    let neg = 0;
+    let pos = 0;
+    if (join != null) {
+      if (join < 0.12) neg += 2;
+      else if (join < 0.18) neg += 1;
+      else if (join >= 0.18) pos += 1;
+    }
+    if (tgt != null) {
+      if (tgt < 0.12) neg += 2;
+      else if (tgt < 0.2) neg += 1;
+    }
+    if (goalPct != null) {
+      if (goalPct < 75) neg += 2;
+      else if (goalPct < 90) neg += 1;
+      else if (goalPct >= 95) pos += 1;
+    }
+    if (catPr != null) {
+      if (catPr < 35) neg += 2;
+      else if (catPr < 50) neg += 1;
+      if (catPr >= 72) pos += 2;
+      else if (catPr >= 55) pos += 1;
+    }
+    if (freeShare != null && freeShare > 0.55 && join != null && join < 0.18) neg += 1;
+    if (progShow != null && progShow >= 92) pos += 1;
+    if (tgtUserShare != null && tgtUserShare < 0.3 && join != null && join < 0.15) neg += 1;
+
+    const divergeRevJoin =
+      catPr != null &&
+      catPr >= 58 &&
+      join != null &&
+      join < 0.15;
+    const divergeJoinRev =
+      catPr != null &&
+      catPr < 45 &&
+      join != null &&
+      join >= 0.17;
+
+    let opening = '';
+    if (divergeRevJoin || divergeJoinRev) {
+      opening =
+        '本期在同品类收入与参与付费率上信号不完全一致，综合判断宜拆分曝光/人群与付费动线分别归因，再定优先级。';
+    } else if (neg >= 5) {
+      opening =
+        '本期多项核心指标同时走弱，整体承压，剩余周期需在增收、触达与转化上明确抓手并快速试错。';
+    } else if (neg >= 3) {
+      opening = '本期整体偏谨慎，关键短板已显现，建议结合下方分维度要点逐项验证。';
+    } else if (pos >= 4 && neg <= 1) {
+      opening =
+        '本期在同品类对比与核心转化上的表现相对积极，宜巩固有效动作并持续对照目标达成度收官。';
+    } else if (pos >= 2 && neg === 0) {
+      opening = '本期监测快照整体相对健康，可在目标达成与分层表现上保持跟踪并做小幅优化。';
+    } else {
+      opening =
+        '本期各维度信号交织，整体尚可但仍有优化空间，可对照下方要点与⑥策略建议安排优先级。';
+    }
+
+    let follow = '';
+    if (join != null && join < 0.12) {
+      follow = ' 其中，参与付费率偏低是当前最突出的矛盾点。';
+    } else if (goalPct != null && goalPct < 75) {
+      follow = ' 其中，收入目标达成度偏紧，需在剩余窗口内聚焦增收节奏。';
+    } else if (tgt != null && tgt < 0.12) {
+      follow = ' 其中，目标触达率偏低，宜优先检视宣发与触达效率。';
+    } else if (catPr != null && catPr < 35) {
+      follow = ' 其中，同品类收入分位偏低，玩法与定价竞争力建议对标近期标杆。';
+    } else if (
+      freeShare != null &&
+      freeShare > 0.55 &&
+      join != null &&
+      join < 0.18
+    ) {
+      follow = ' 其中，免费抽占比偏高且付费转化一般，赠抽与付费入口宜联动调整。';
+    } else if (neg <= 1 && catPr != null && catPr >= 68) {
+      follow = ' 收入侧在同品类中处于偏强分位，建议沉淀可复用因素。';
+    } else if (neg <= 1 && join != null && join >= 0.18 && tgt != null && tgt >= 0.18) {
+      follow = ' 触达与付费转化勾稽尚可，可保持主线并微调素材与档位。';
+    }
+
+    const text = opening + follow;
+    return (
+      '<div class="review-synthesis-verdict">' +
+      '<div class="review-synthesis-verdict__kicker">综合结论</div>' +
+      '<p class="review-synthesis-verdict__body">' +
+      esc(text) +
+      '</p>' +
+      '</div>'
+    );
+  }
+
+  /**
    * 给业务的下一步策略：可执行向建议，与「④ 综合判断」互补；规则与快照指标挂钩。
    * @param {object|null} pa 当前累计·表内 n 日·全量快照行
    * @param {{
@@ -2037,6 +2149,12 @@
       '</section>' +
       '<section class="review-mod review-mod--synthesis">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 综合判断（跨维度）</h3>' +
+      buildComprehensiveVerdictHtml(pa, pyes, {
+        linearEst,
+        usedScript30,
+        scriptProgressPct,
+        catPr,
+      }) +
       buildSynthesisModuleHtml(pa, pyes, {
         linearEst,
         usedScript30,

@@ -887,6 +887,28 @@
     .review-mod--synthesis .review-mod-note {
       color: #475569;
     }
+    .review-synthesis-verdict {
+      margin: 0 0 14px;
+      padding: 12px 14px;
+      background: linear-gradient(135deg, #f5f3ff 0%, #eef2ff 55%, #f8fafc 100%);
+      border: 1px solid #c7d2fe;
+      border-radius: 10px;
+      border-left: 4px solid #4f46e5;
+    }
+    .review-synthesis-verdict__kicker {
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #4338ca;
+      margin-bottom: 8px;
+    }
+    .review-synthesis-verdict__body {
+      margin: 0;
+      font-size: 0.86rem;
+      font-weight: 600;
+      line-height: 1.65;
+      color: #1e1b4b;
+    }
     .review-layer-insight {
       margin: 0 0 12px;
       padding-bottom: 10px;
