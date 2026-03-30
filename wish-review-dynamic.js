@@ -1111,6 +1111,102 @@
     );
   }
 
+  /** 同一专题内，按活动标识在 periods（期次降序）中取紧邻的上一期汇总行 */
+  function findPrevPeriodSummaryRow(sumRow) {
+    const topicName = val(sumRow, '专题名称');
+    const aid = val(sumRow, '活动标识');
+    if (!topicName || !aid) return null;
+    const topic = state.topics.find((x) => x.name === topicName);
+    if (!topic || !topic.periods || topic.periods.length < 2) return null;
+    const arr = topic.periods;
+    for (let i = 0; i < arr.length; i++) {
+      if (val(arr[i], '活动标识') !== aid) continue;
+      const j = i + 1;
+      if (j < arr.length) return arr[j];
+      return null;
+    }
+    return null;
+  }
+
+  function parseGoalPercentCell(raw) {
+    if (raw == null || raw === '') return null;
+    const t = String(raw).trim().replace(/,/g, '');
+    const m = t.match(/(-?[\d.]+)\s*%/);
+    if (m) {
+      const n = parseFloat(m[1]);
+      return Number.isFinite(n) ? n : null;
+    }
+    const n = parseFloat(t);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /** 与本期 KPI 同口径：当前累计·上线 n 日内·全部 + 预估 30 日数值（用于环比） */
+  function getKpiComparisonBase(sumRow) {
+    const aid = val(sumRow, '活动标识');
+    const daysRaw = toNum(val(sumRow, '已上线天数'));
+    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 1;
+    const snap = snapRowN(state.rows, aid, daysInt);
+    const pa = snap.pa;
+    const n = snap.n;
+    if (!pa) return null;
+    const rev = toNum(val(pa, '总收入'));
+    const join = rate01(val(pa, '参与付费率'));
+    const paidUv = toNum(val(pa, '付费抽卡用户数'));
+    const ppd = toNum(val(pa, '付费抽用户-人均付费抽数'));
+    const arppu = toNum(val(pa, '触达付费ARPPU'));
+    const goalRaw = val(pa, '目标达成度');
+    const goalPct = parseGoalPercentCell(goalRaw);
+
+    const genre = val(sumRow, '品类') || '—';
+    const nModel = Math.min(9, Math.max(1, daysInt));
+    const snapM = snapRowN(state.rows, aid, nModel);
+    const revModelBase =
+      snapM.pa && toNum(val(snapM.pa, '总收入')) != null
+        ? toNum(val(snapM.pa, '总收入'))
+        : rev;
+    const paModel = snapM.pa || pa;
+    const genreForModel = genre === '—' ? '' : genre;
+    const topicForModel = val(sumRow, '专题名称') || '';
+    const pack = getOrBuildModelPack(genreForModel, topicForModel);
+    let pred30v = null;
+    if (
+      revModelBase != null &&
+      revModelBase > 0 &&
+      paModel &&
+      typeof pack.predFn === 'function'
+    ) {
+      pred30v = pack.predFn(revModelBase, paModel);
+    }
+    const linearEst = linearEst30Revenue(rev, n);
+    let est30Num = null;
+    if (format30dRevenueKpi(revModelBase, pred30v) != null && pred30v != null) {
+      est30Num = Math.round(pred30v);
+    } else if (linearEst.est != null) {
+      est30Num = Math.round(linearEst.est);
+    }
+
+    return {
+      rev,
+      join,
+      paidUv,
+      ppd,
+      arppu,
+      goalPct,
+      est30Num,
+    };
+  }
+
+  /** 相对上一期的增幅百分比，如（上一期-15%）（上一期+8%）；基期为 0 时不展示避免歧义 */
+  function yoyPercentSpanHtml(prevVal, currVal) {
+    if (prevVal == null || currVal == null) return '';
+    if (!Number.isFinite(prevVal) || !Number.isFinite(currVal)) return '';
+    if (prevVal === 0) return '';
+    const pct = ((currVal - prevVal) / prevVal) * 100;
+    const rounded = Math.round(pct);
+    const sign = rounded > 0 ? '+' : '';
+    return '<span class="kpi-yoy">（上一期' + sign + rounded + '%）</span>';
+  }
+
   function buildPeriodBoardArticle(sumRow) {
     const pNo = periodNum(sumRow);
     const aid = val(sumRow, '活动标识');
@@ -1207,6 +1303,30 @@
       est30Strong = '—';
     }
 
+    let est30Num = null;
+    if (formattedScript) {
+      est30Num = pred30v != null ? Math.round(pred30v) : null;
+    } else if (linearEst.est != null) {
+      est30Num = Math.round(linearEst.est);
+    }
+
+    const prevSumRow = findPrevPeriodSummaryRow(sumRow);
+    const prevKpi = prevSumRow ? getKpiComparisonBase(prevSumRow) : null;
+    const goalPctCurr = parseGoalPercentCell(goalCell);
+    const yoyRev = prevKpi ? yoyPercentSpanHtml(prevKpi.rev, rev) : '';
+    const yoyEst =
+      prevKpi && est30Num != null && prevKpi.est30Num != null
+        ? yoyPercentSpanHtml(prevKpi.est30Num, est30Num)
+        : '';
+    const yoyGoal =
+      prevKpi && goalPctCurr != null && prevKpi.goalPct != null
+        ? yoyPercentSpanHtml(prevKpi.goalPct, goalPctCurr)
+        : '';
+    const yoyJoin = prevKpi ? yoyPercentSpanHtml(prevKpi.join, join) : '';
+    const yoyPaid = prevKpi ? yoyPercentSpanHtml(prevKpi.paidUv, paidUv) : '';
+    const yoyPpd = prevKpi ? yoyPercentSpanHtml(prevKpi.ppd, ppd) : '';
+    const yoyArppu = prevKpi ? yoyPercentSpanHtml(prevKpi.arppu, arppu) : '';
+
     const catPr =
       rev != null && Number.isFinite(rev) && rev > 0
         ? percentileRankSameGenre(rev, genre)
@@ -1214,13 +1334,13 @@
 
     const kpiBlock = pa
       ? `<div class="period-kpis">
-          <div class="kpi-pill"><span class="kpi-l">${n}日累计收入</span><strong>${fmtInt(rev)}</strong></div>
-          <div class="kpi-pill kpi-pill-goal"><span class="kpi-l">预估30日收入</span><strong>${est30Strong}</strong></div>
-          <div class="kpi-pill kpi-pill-goal"><span class="kpi-l">收入目标达成度</span><strong>${goalHtml}</strong></div>
-          <div class="kpi-pill"><span class="kpi-l">参与付费率</span><strong>${join != null ? fmtPct(join) : '—'}</strong></div>
-          <div class="kpi-pill"><span class="kpi-l">付费抽卡人数</span><strong>${fmtInt(paidUv)}</strong></div>
-          <div class="kpi-pill"><span class="kpi-l">付费抽人均抽数</span><strong>${ppd != null ? ppd.toFixed(2) : '—'}</strong></div>
-          <div class="kpi-pill"><span class="kpi-l">付费ARPPU</span><strong>${arppu != null ? arppu.toFixed(2) : '—'}</strong></div>
+          <div class="kpi-pill"><span class="kpi-l">${n}日累计收入</span><strong>${fmtInt(rev)}${yoyRev}</strong></div>
+          <div class="kpi-pill kpi-pill-goal"><span class="kpi-l">预估30日收入</span><strong>${est30Strong}${yoyEst}</strong></div>
+          <div class="kpi-pill kpi-pill-goal"><span class="kpi-l">收入目标达成度</span><strong>${goalHtml}${yoyGoal}</strong></div>
+          <div class="kpi-pill"><span class="kpi-l">参与付费率</span><strong>${join != null ? fmtPct(join) : '—'}${yoyJoin}</strong></div>
+          <div class="kpi-pill"><span class="kpi-l">付费抽卡人数</span><strong>${fmtInt(paidUv)}${yoyPaid}</strong></div>
+          <div class="kpi-pill"><span class="kpi-l">付费抽人均抽数</span><strong>${ppd != null ? ppd.toFixed(2) : '—'}${yoyPpd}</strong></div>
+          <div class="kpi-pill"><span class="kpi-l">付费ARPPU</span><strong>${arppu != null ? arppu.toFixed(2) : '—'}${yoyArppu}</strong></div>
         </div>`
       : '<p class="review-mod-note">无当前累计快照，顶栏 KPI 略。</p>';
 

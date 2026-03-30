@@ -475,6 +475,14 @@
       color: #0f172a;
       font-weight: 700;
     }
+    .kpi-pill .kpi-yoy {
+      display: block;
+      margin-top: 3px;
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: #64748b;
+      line-height: 1.25;
+    }
     .kpi-pill .kpi-level {
       font-weight: 600;
       font-size: 0.78em;
