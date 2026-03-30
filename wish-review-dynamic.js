@@ -4,10 +4,10 @@
   const $ = (id) => document.getElementById(id);
 
   /**
-   * 监测表「当前累计·上线 n 日内」允许的 n 上限（解析与快照匹配共用，挡异常行）。
-   * 各期实际 n 取自该期「已上线天数」取整，与表内周期列一致。
+   * 监测表「当前累计·上线 n 日内」的 n 上限为 30（与业务窗口一致；解析与快照匹配共用）。
+   * 各期实际 n = min(30, floor(已上线天数))。
    */
-  const MONITOR_SNAP_DAY_MAX = 3660;
+  const MONITOR_SNAP_DAY_MAX = 30;
 
   function esc(s) {
     if (s == null || s === '') return '';
@@ -603,8 +603,9 @@
     const all = new Map([...sm.entries(), ...sb.entries()]);
     const vals = [];
     all.forEach((summ, aid) => {
-      const d = Math.floor(toNum(val(summ, '已上线天数')) || 0);
-      if (d < 1) return;
+      const dRaw = Math.floor(toNum(val(summ, '已上线天数')) || 0);
+      if (dRaw < 1) return;
+      const d = Math.min(MONITOR_SNAP_DAY_MAX, dRaw);
       const r = snapRevCacheGet(state.snapCacheMerged, aid, d);
       if (r != null && r > 0 && Number.isFinite(r)) vals.push(r);
     });
@@ -1103,7 +1104,7 @@
       '日累计收入 <strong>' +
       fmtInt(rev) +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">n 取该期「已上线天数」向下取整，与监测表「当前累计·上线 n 日内」一致。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">n = min(30, 该期「已上线天数」向下取整)，与监测表「当前累计·上线 n 日内」一致。</div></details>' +
       '</section>' +
       '<section class="mini-card" aria-label="触达效率">' +
       '<h4 class="mini-card-title">触达效率</h4>' +
@@ -1182,7 +1183,7 @@
       '</strong>｜参与付费率 <strong>' +
       (join != null ? fmtPct(join) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">分位：同「品类」下各活动按自身「已上线天数」取「当前累计·上线 n 日内·全部」收入排序，看本期同期 n 日收入约超多少比例样本（监测合并表 + 同夹池表去重）。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">分位：同「品类」下各活动 n=min(30,自身已上线天数取整)，取「当前累计·上线 n 日内·全部」收入排序（监测 + 同夹池表去重）。</div></details>' +
       '</section>' +
       '</div>';
 
@@ -1449,7 +1450,7 @@
       (periods.length > 1
         ? '；另有 <strong>' + esc(String(periods.length - 1)) + '</strong> 期请在下方折叠区展开查看。'
         : '。') +
-      ' 大表已自动<strong>仅保留汇总行与「当前累计·上线 n 日内」快照</strong>（含 9/30 日等用于多模型与分位）。' +
+      ' 大表已自动<strong>仅保留汇总行与「当前累计·上线 1–30 日内」快照</strong>（含 9/30 日等用于多模型与分位）。' +
       ' 顶栏「预估30日」与静态页一致：<strong>同品类往期留一法</strong>并混入<strong>整体数据监测同夹对标池</strong> R30/R9。</p>' +
       '<div class="fish-period-stack">' +
       latestBoard +
@@ -1570,7 +1571,7 @@
     }
     if (status) {
       status.textContent =
-        '正在解析整体数据监测（监测表 + 同夹对标池；仅保留汇总与上线 n 日内快照）…';
+        '正在解析整体数据监测（监测表 + 同夹对标池；仅保留汇总与上线 1–30 日内快照）…';
     }
     const raw = await readFn();
     if (!raw.ok) {
