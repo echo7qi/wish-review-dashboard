@@ -510,7 +510,8 @@ async function readMonitorCsvFromBoundRoot() {
 }
 
 /**
- * 读取「整体数据监测」内：监测表（多文件合并）+ 同夹对标池 CSV（*池历史* 等），与生成脚本 data-bundle 约定一致。
+ * 读取：整体数据监测（监测表合并）+ 同夹对标池 + 「分层用户监测」子目录内全部 CSV（mtime 升序合并）。
+ * 与生成脚本 data-bundle 约定一致；作品明细表仍不由此入口加载，以免大文件 OOM。
  */
 async function readMonitorAndBenchFromBoundRoot() {
   const root = await getBoundDirHandle();
@@ -560,13 +561,35 @@ async function readMonitorAndBenchFromBoundRoot() {
     benchRes = { ok: true, ...finalizeCsvPartsResult(benchParts) };
   }
 
+  const layerSub = await resolveFirstChildDir(review.handle, BUNDLE_SUBS.layer);
+  let layerRes = {
+    ok: true,
+    skipped: true,
+    parts: [],
+    fileNames: [],
+    fileName: '',
+    lastModified: 0,
+  };
+  if (layerSub) {
+    const layerMetas = listAllCsvMetasSortedAsc(await listCsvWithMtime(layerSub.handle));
+    if (layerMetas.length) {
+      layerRes = {
+        ok: true,
+        skipped: false,
+        ...finalizeCsvPartsResult(await readTextPartsFromDir(layerSub.handle, layerMetas)),
+      };
+    }
+  }
+
   const lm = mainRes.lastModified || 0;
   const lb = benchRes.lastModified || 0;
+  const ll = layerRes.lastModified || 0;
   return {
     ok: true,
     main: mainRes,
     bench: benchRes,
-    lastModified: Math.max(lm, lb),
+    layer: layerRes,
+    lastModified: Math.max(lm, lb, ll),
   };
 }
 

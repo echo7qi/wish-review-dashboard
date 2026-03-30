@@ -123,6 +123,255 @@
     return Array.from(m.values());
   }
 
+  /** 分层用户监测 CSV：与生成脚本 get_layer_matched_sorted 口径一致（当前累计 + 上线 n 日内 + 有分层列） */
+  function isLayerUsefulRow(r) {
+    const aid = val(r, '活动标识');
+    if (!aid) return false;
+    if (!String(val(r, '目标用户分层') || '').trim()) return false;
+    const pk = String(val(r, '第x次祈愿') || '').trim();
+    if (!pk) return false;
+    if (val(r, '数据分类') !== '当前累计') return false;
+    const dp = String(val(r, '数据周期') || '').trim();
+    const m = dp.match(/^上线(\d+)日内$/);
+    if (!m) return false;
+    const n = parseInt(m[1], 10);
+    return n >= 1 && n <= MONITOR_SNAP_DAY_MAX;
+  }
+
+  function parseLayerCsvToRows(text, logLabel) {
+    const acc = [];
+    const errs = [];
+    let scanned = 0;
+    Papa.parse(text, {
+      header: true,
+      skipEmptyLines: 'greedy',
+      worker: false,
+      error(e) {
+        errs.push({ type: 'fatal', message: String((e && e.message) || e) });
+      },
+      step(results) {
+        if (results.errors && results.errors.length) {
+          for (let i = 0; i < results.errors.length; i++) errs.push(results.errors[i]);
+        }
+        const raw = results.data;
+        if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return;
+        scanned += 1;
+        const row = normalizeRowKeys(raw);
+        if (!isLayerUsefulRow(row)) return;
+        acc.push(row);
+      },
+      complete(results) {
+        if (results && results.errors && results.errors.length) {
+          for (let i = 0; i < results.errors.length; i++) errs.push(results.errors[i]);
+        }
+      },
+    });
+    if (errs.length) {
+      console.warn('[wish-review-dynamic] layer', logLabel || 'CSV', errs.slice(0, 10));
+    }
+    return { rows: acc, scanned, kept: acc.length };
+  }
+
+  function layerRowDedupeKey(r) {
+    return [
+      val(r, '活动标识'),
+      String(val(r, '第x次祈愿') || '').trim(),
+      val(r, '数据分类'),
+      val(r, '数据周期'),
+      String(val(r, '目标用户分层') || '').trim(),
+    ].join('\x01');
+  }
+
+  function dedupeLayerRows(rows) {
+    const m = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      m.set(layerRowDedupeKey(r), r);
+    }
+    return Array.from(m.values());
+  }
+
+  const LAYER_ORDER = [
+    '[200+)',
+    '[100-200)',
+    '[50-100)',
+    '[20-50)',
+    '[1-20)',
+    '(0-1)',
+    '[0]',
+    '非目标用户',
+  ];
+
+  function layerSortKey(name) {
+    const s = String(name || '').trim();
+    const ix = LAYER_ORDER.indexOf(s);
+    return ix >= 0 ? ix : 500;
+  }
+
+  function buildLayerRowIndex(rowsLayer) {
+    const idx = new Map();
+    for (let i = 0; i < rowsLayer.length; i++) {
+      const r = rowsLayer[i];
+      const aid = val(r, '活动标识');
+      if (!aid) continue;
+      const pk = String(val(r, '第x次祈愿') || '').trim();
+      const dc = val(r, '数据分类');
+      const dr = val(r, '数据周期');
+      const key = [aid, pk, dc, dr].join('\x01');
+      let arr = idx.get(key);
+      if (!arr) {
+        arr = [];
+        idx.set(key, arr);
+      }
+      arr.push(r);
+    }
+    return idx;
+  }
+
+  function getLayerMatchedSorted(layerIndex, aid, periodNo, nSnap) {
+    if (!layerIndex || !layerIndex.size) return [];
+    const dc = `上线${parseInt(String(nSnap), 10) || 1}日内`;
+    const pk = String(periodNo).trim();
+    const key = [String(aid || '').trim(), pk, '当前累计', dc].join('\x01');
+    const matched = layerIndex.get(key);
+    if (!matched || !matched.length) return [];
+    const out = matched.slice();
+    out.sort((a, b) => layerSortKey(val(a, '目标用户分层')) - layerSortKey(val(b, '目标用户分层')));
+    return out;
+  }
+
+  function layerMetricShare(raw) {
+    const x = toNum(raw);
+    if (x == null || !Number.isFinite(x)) return null;
+    return x > 1.0001 ? x / 100 : x;
+  }
+
+  function fmtLayerPctCell(raw) {
+    const v = toNum(raw);
+    if (v == null || !Number.isFinite(v)) return '—';
+    if (v > 1.0001) return `${v.toFixed(1)}%`;
+    return `${(v * 100).toFixed(1)}%`;
+  }
+
+  function fmtLayerNumCell(raw) {
+    const v = toNum(raw);
+    if (v == null || !Number.isFinite(v)) return '—';
+    return `${v.toFixed(1)}`;
+  }
+
+  function buildLayerTableHtml(matched) {
+    if (!matched.length) return '';
+    const cols = [
+      { k: '目标用户分层', kind: 'text' },
+      { k: '对应人群收入占比', kind: 'pct' },
+      { k: '参与付费率', kind: 'pct' },
+      { k: '复抽率', kind: 'pct' },
+      { k: '抽到最高等级用户占比', kind: 'pct' },
+      { k: '抽到最高等级卡的人均抽数', kind: 'num' },
+      { k: '付费抽-抽到最高等级卡人均抽数', kind: 'num' },
+      { k: '抽卡用户-人均付费抽数', kind: 'num' },
+      { k: '金爱心礼包贡献收入占比', kind: 'pct' },
+      { k: '付费祈愿券贡献收入占比', kind: 'pct' },
+    ];
+    const ths = [
+      '目标用户分层',
+      '对应人群收入占比',
+      '参与付费率',
+      '复抽率',
+      '顶配用户占比',
+      '抽到最高等级卡人均抽数',
+      '付费抽·顶配人均抽数',
+      '抽卡用户人均付费抽',
+      '礼包收入占比',
+      '祈愿券收入占比',
+    ];
+    const head =
+      '<thead><tr>' + ths.map((t) => `<th scope="col">${esc(t)}</th>`).join('') + '</tr></thead>';
+    const bodyRows = [];
+    for (let ri = 0; ri < matched.length; ri++) {
+      const r = matched[ri];
+      const tds = [];
+      for (let ci = 0; ci < cols.length; ci++) {
+        const c = cols[ci];
+        const raw = val(r, c.k);
+        if (c.kind === 'text') {
+          tds.push(`<td>${esc(String(raw || '').trim() || '—')}</td>`);
+        } else if (c.kind === 'pct') {
+          tds.push(`<td>${esc(fmtLayerPctCell(raw))}</td>`);
+        } else {
+          tds.push(`<td>${esc(fmtLayerNumCell(raw))}</td>`);
+        }
+      }
+      bodyRows.push('<tr>' + tds.join('') + '</tr>');
+    }
+    return (
+      '<div class="layer-table-scroll">' +
+      '<table class="layer-table">' +
+      head +
+      '<tbody>' +
+      bodyRows.join('') +
+      '</tbody></table></div>'
+    );
+  }
+
+  /** 分层块顶部条形：与生成脚本条形维度一致，不输出长段结论文案 */
+  function buildLayerInsightBarsHtml(matched) {
+    if (!matched.length) return '';
+    const parsed = [];
+    for (let i = 0; i < matched.length; i++) {
+      const r = matched[i];
+      parsed.push({
+        name: String(val(r, '目标用户分层') || '').trim() || '—',
+        rs: layerMetricShare(val(r, '对应人群收入占比')),
+        jp: layerMetricShare(val(r, '参与付费率')),
+        rr: layerMetricShare(val(r, '复抽率')),
+        gr: layerMetricShare(val(r, '金爱心礼包贡献收入占比')),
+      });
+    }
+    const validRs = parsed.filter((x) => x.rs != null);
+    if (!validRs.length) return '';
+    let dom = validRs[0];
+    for (let i = 1; i < validRs.length; i++) {
+      if (validRs[i].rs > dom.rs) dom = validRs[i];
+    }
+    let bars = hbarHtml(
+      '收入占比最高·' + dom.name.slice(0, 22),
+      dom.rs,
+      fmtPct(dom.rs),
+      '#4f46e5',
+    );
+    const rHi = parsed.find((x) => {
+      const s = x.name;
+      return s.startsWith('[200') || s.startsWith('200');
+    });
+    if (rHi && rHi.gr != null && Number.isFinite(rHi.gr)) {
+      bars += hbarHtml('高价层·礼包占该层收入', rHi.gr, fmtPct(rHi.gr), '#0d9488');
+    }
+    const repeatVals = parsed.map((x) => x.rr).filter((x) => x != null && Number.isFinite(x));
+    if (repeatVals.length) {
+      let rrMin = repeatVals[0];
+      for (let i = 1; i < repeatVals.length; i++) {
+        if (repeatVals[i] < rrMin) rrMin = repeatVals[i];
+      }
+      bars += hbarHtml('各层复抽率·最低档', rrMin, fmtPct(rrMin), '#6366f1');
+    }
+    return bars ? '<div class="review-layer-insight">' + bars + '</div>' : '';
+  }
+
+  function buildLayerModuleHtml(sumRow, layerIndex, nSnap, periodNo) {
+    const aid = val(sumRow, '活动标识');
+    if (!state.layerRows || !state.layerRows.length) {
+      return '<p class="review-mod-note">未读取到「分层用户监测」文件夹内 CSV。</p>';
+    }
+    const matched = getLayerMatchedSorted(layerIndex, aid, periodNo, nSnap);
+    if (!matched.length) {
+      return '<p class="review-mod-note">本期未匹配到分层行（核对活动标识、期次与「当前累计·上线' + esc(String(nSnap)) + '日内」）。</p>';
+    }
+    const insight = buildLayerInsightBarsHtml(matched);
+    const table = buildLayerTableHtml(matched);
+    return insight + '<div class="review-layer-inner">' + table + '</div>';
+  }
+
   function periodNum(row) {
     const n = parseInt(String(val(row, '第x次祈愿') || '0'), 10);
     return Number.isFinite(n) ? n : 0;
@@ -686,6 +935,7 @@
     snapCacheMerged: Object.create(null),
     modelPackByGenre: new Map(),
     layerRows: [],
+    layerIndex: new Map(),
     workRows: [],
     topics: [],
     fileName: '',
@@ -1130,7 +1380,7 @@
       '</div>' +
       '<section class="review-mod review-mod--layer">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 付费分层表现</h3>' +
-      '<p class="review-mod-note">分层监测数据未载入。</p>' +
+      buildLayerModuleHtml(sumRow, state.layerIndex, n, pNo) +
       '</section>' +
       '<section class="review-mod review-mod--synthesis">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">⑤</span> 综合判断（跨维度）</h3>' +
@@ -1456,6 +1706,20 @@
     return { merged, scanned, kept };
   }
 
+  function ingestLayerCsvParts(parts, labelPrefix) {
+    let merged = [];
+    let scanned = 0;
+    let kept = 0;
+    if (!parts || !parts.length) return { merged, scanned, kept };
+    for (let pi = 0; pi < parts.length; pi++) {
+      const one = parseLayerCsvToRows(parts[pi].text, parts[pi].name || labelPrefix);
+      scanned += one.scanned;
+      kept += one.kept;
+      merged = merged.concat(one.rows);
+    }
+    return { merged, scanned, kept };
+  }
+
   async function loadFromBinding() {
     const status = $('wishReviewDashStatus');
     const src = $('wishReviewDashSource');
@@ -1494,6 +1758,7 @@
       state.snapCacheMerged = Object.create(null);
       state.modelPackByGenre.clear();
       state.layerRows = [];
+      state.layerIndex = new Map();
       state.workRows = [];
       state.topics = [];
       if (typeof window !== 'undefined') window.__WISH_REVIEW_BUNDLE_DATA__ = null;
@@ -1512,6 +1777,7 @@
     let benchMerged = [];
     let benchScanned = 0;
     let benchKept = 0;
+    let layerMerged = [];
 
     try {
       if (parts) {
@@ -1543,6 +1809,12 @@
         csvScannedTotal += benchScanned;
         csvKeptBeforeDedupe += benchKept;
       }
+      if (isBundle && raw.layer && raw.layer.parts && raw.layer.parts.length) {
+        const ingL = ingestLayerCsvParts(raw.layer.parts, '分层');
+        layerMerged = ingL.merged;
+        csvScannedTotal += ingL.scanned;
+        csvKeptBeforeDedupe += ingL.kept;
+      }
     } catch (e) {
       if (status) {
         status.hidden = false;
@@ -1558,7 +1830,8 @@
     state.mergedRows = dedupeMonitoringRows(mergedRows.concat(benchMerged));
     state.snapCacheMain = buildSnapRevCache(state.rows);
     state.snapCacheMerged = buildSnapRevCache(state.mergedRows);
-    state.layerRows = [];
+    state.layerRows = dedupeLayerRows(layerMerged);
+    state.layerIndex = buildLayerRowIndex(state.layerRows);
     state.workRows = [];
 
     const lastMod = isBundle ? raw.lastModified || mainBlock.lastModified : mainBlock.lastModified;
@@ -1570,7 +1843,7 @@
         mergedRowCount: state.mergedRows.length,
         csvScannedRows: csvScannedTotal,
         csvKeptBeforeDedupeRows: csvKeptBeforeDedupe,
-        layerRowCount: 0,
+        layerRowCount: state.layerRows.length,
         workRowCount: 0,
         loadedAt: Date.now(),
         note: '',
