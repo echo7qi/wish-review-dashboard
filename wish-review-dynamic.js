@@ -214,8 +214,7 @@
     fileName: '',
     selected: null,
     filter: '',
-    /** 右侧 fish 版复盘：是否已展开该专题除最新期外的往期 */
-    showPastPeriodsExpanded: false,
+    // This dashboard always renders only the latest period (no past expansion).
     // Auto refresh: compare monitor CSV latest mtime to decide reload.
     lastMainMonitorLastModified: null,
   };
@@ -676,7 +675,6 @@
   }
 
   function setSelected(name) {
-    state.showPastPeriodsExpanded = false;
     state.selected = name;
     renderList();
     renderDetail(name);
@@ -742,7 +740,7 @@
         layerRowCount: 0,
         workRowCount: 0,
         loadedAt: Date.now(),
-        note: '仅保留汇总行+当前累计·上线1–9日内；流式解析降低内存',
+        note: '完整监测 CSV 解析；仅展示最新一期复盘卡（浏览器端不复现本地 Python 全量文案）。',
       };
     }
     const built = buildTopicModels(state.rows);
@@ -761,7 +759,7 @@
           : `已加载 ${state.rows.length} 行`) +
         ` · ${built.topicCount} 个专题 · ${built.activityDedupCount} 个祈愿活动` +
         `（汇总·全部 原始 ${built.rawSummaryCount} 行，专题内按活动标识去重）` +
-        ' · 已瘦身解析（原表再大也只保留看板用行）；对标池等未载入，全量请用本地脚本';
+        ' · 已完成完整监测 CSV 解析（性能取决于数据量）；对标池等仍未载入，全量请用本地脚本';
     }
     if (src) {
       const label =
@@ -775,7 +773,6 @@
     state.lastMainMonitorLastModified = mainBlock.lastModified || null;
     ensureAutoRefresh();
 
-    state.showPastPeriodsExpanded = false;
     if (!state.selected || !state.topics.some((x) => x.name === state.selected)) {
       state.selected = state.topics[0] ? state.topics[0].name : null;
     }
@@ -805,18 +802,6 @@
         setSelected(btn.getAttribute('data-topic'));
       });
     });
-
-    const detailCard = $('wishReviewDetail');
-    if (detailCard) {
-      detailCard.addEventListener('click', (ev) => {
-        const b = ev.target.closest('.wishReviewPastPeriodsBtn');
-        if (!b) return;
-        const act = b.getAttribute('data-wish-review-past');
-        if (act === 'expand') state.showPastPeriodsExpanded = true;
-        else if (act === 'collapse') state.showPastPeriodsExpanded = false;
-        renderDetail(state.selected);
-      });
-    }
 
     document.addEventListener('wishreview:datasource-updated', () => loadFromBinding());
 
