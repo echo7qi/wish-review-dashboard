@@ -609,46 +609,54 @@
     .rv-funnel {
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 18px;
     }
-    .rv-funnelStep__row {
+    /* 文字全部在色块上方：首行左标签右数值 → 次行仅左侧「占上一级」→ 最底仅轨道+填充（填充内无文字） */
+    .rv-funnelStep__head {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
-      gap: 10px;
+      gap: 12px;
     }
     .rv-funnelStep__label {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: #334155;
-      line-height: 1.3;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: #888888;
+      line-height: 1.35;
+      text-align: left;
     }
     .rv-funnelStep__val {
-      font-size: 0.95rem;
-      font-weight: 800;
+      font-size: 1rem;
+      font-weight: 700;
       font-variant-numeric: tabular-nums;
-      color: #0f172a;
+      color: #333333;
       flex-shrink: 0;
+      line-height: 1.2;
     }
     .rv-funnelStep__conv {
-      font-size: 0.78rem;
+      font-size: 0.8125rem;
       font-weight: 600;
-      color: #2563eb;
-      margin: 2px 0 6px;
-      line-height: 1.3;
+      color: #6b63e8;
+      margin: 6px 0 0;
+      padding: 0;
+      line-height: 1.35;
+      text-align: left;
     }
-    .rv-funnelStep__bar {
+    .rv-funnelStep__barTrack {
       height: 10px;
-      background: #e2e8f0;
+      margin-top: 10px;
+      background: #e5e9f2;
       border-radius: 999px;
       overflow: hidden;
     }
-    .rv-funnelStep__fill {
+    .rv-funnelStep--first .rv-funnelStep__barTrack {
+      margin-top: 14px;
+    }
+    .rv-funnelStep__barFill {
       height: 100%;
       min-width: 0;
       border-radius: 999px;
-      background: linear-gradient(90deg, #7c3aed 0%, #5b21b6 18%, #4f46e5 50%, #2563eb 100%);
-      box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.12);
+      background: linear-gradient(90deg, #7b76f0 0%, #857cf5 40%, #918bff 100%);
       transition: width 0.28s ease;
     }
     @media (max-width: 900px) {

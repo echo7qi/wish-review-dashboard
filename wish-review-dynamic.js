@@ -606,14 +606,14 @@
     }
 
     return (
-      `<div class="rv-funnelStep">` +
-      `<div class="rv-funnelStep__row">` +
+      `<div class="rv-funnelStep${stepIndex === 0 ? ' rv-funnelStep--first' : ''}">` +
+      `<div class="rv-funnelStep__head">` +
       `<span class="rv-funnelStep__label">${esc(label)}</span>` +
       `<span class="rv-funnelStep__val">${esc(valText)}</span>` +
       `</div>` +
       convRow +
-      `<div class="rv-funnelStep__bar" role="presentation">` +
-      `<div class="rv-funnelStep__fill" style="width:${fillPct.toFixed(1)}%"></div>` +
+      `<div class="rv-funnelStep__barTrack" role="presentation">` +
+      `<div class="rv-funnelStep__barFill" style="width:${fillPct.toFixed(1)}%"></div>` +
       `</div>` +
       `</div>`
     );
