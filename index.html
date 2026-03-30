@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>祈愿单项目复盘看板（独立站点）</title>
+    <link rel="stylesheet" href="./styles.css?v=20260330" />
+    <link rel="stylesheet" href="./wish-review-fish-layout.css?v=20260330" />
+  </head>
+  <body data-page="wish-review">
+    <div class="appShell">
+      <aside class="sidebar">
+        <div class="sidebar__brand">祈愿复盘看板</div>
+        <div class="wishReviewSidebarTools">
+          <div class="wishReviewSidebarTools__title">数据绑定</div>
+          <button type="button" class="btn js-wish-review-bind">绑定数据文件夹</button>
+          <button type="button" class="btn btn--ghost js-wish-review-scan">扫描数据源</button>
+        </div>
+        <div class="wishReviewSidebarTools wishReviewSidebarTools--tight">
+          <p class="sidebar__hint sidebar__hint--tight muted" style="margin-top: 8px">
+            数据在浏览器本地解析，不上传。
+          </p>
+        </div>
+      </aside>
+
+      <div class="appShell__content appShell__content--wishReview">
+        <header class="header">
+          <div class="header__title">
+            <h1>祈愿单项目复盘</h1>
+            <div class="header__subtitle">
+              右侧展示：绑定目录内“该专题最新期”的完整五维复盘（iframe 内嵌）。
+            </div>
+          </div>
+        </header>
+
+        <main class="reviewEmbedMain reviewEmbedMain--dynamic">
+          <section class="wishReviewDash">
+            <div class="wishReviewDash__toolbar">
+              <input
+                type="search"
+                id="wishReviewTopicSearch"
+                class="wishReviewDash__search"
+                placeholder="按专题名称模糊搜索（监测表「专题名称」列）"
+                autocomplete="off"
+              />
+              <button type="button" class="btn" id="wishReviewReloadBtn">重新加载监测数据</button>
+              <span id="wishReviewDashStatus" class="wishReviewDash__status muted"></span>
+              <span id="wishReviewDashSource" class="wishReviewDash__source muted"></span>
+            </div>
+
+            <div class="wishReviewDash__grid">
+              <div class="wishReviewDash__col wishReviewDash__col--list">
+                <div class="wishReviewDash__section">
+                  <h2 class="wishReviewDash__h">本周新上线（自然周·周一至今日）</h2>
+                  <div id="wishReviewWeekList" class="wishReviewDash__topicList"></div>
+                </div>
+                <div class="wishReviewDash__section">
+                  <h2 class="wishReviewDash__h">近 7 日新上线（不含已计入本周）</h2>
+                  <div id="wishReview7dList" class="wishReviewDash__topicList"></div>
+                </div>
+                <div class="wishReviewDash__section">
+                  <h2 class="wishReviewDash__h">全部专题（按最近上线排序）</h2>
+                  <div id="wishReviewAllList" class="wishReviewDash__topicList"></div>
+                </div>
+              </div>
+
+              <div class="wishReviewDash__col wishReviewDash__col--detail">
+                <div id="wishReviewDetail" class="wishReviewDash__detail card">
+                  <div id="wishReviewDetailInner" class="card__body">
+                    <p class="muted wishReviewDash__empty">加载中…</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="./wish-review.js"></script>
+    <script src="./wish-review-dynamic.js"></script>
+  </body>
+</html>
+
