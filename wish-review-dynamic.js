@@ -790,19 +790,11 @@
     };
   }
 
-  function format30dRevenueKpi(cache, aid, days, revBase, pred30v) {
+  function format30dRevenueKpi(revBase, pred30v) {
     if (pred30v == null || pred30v <= 0 || !revBase || revBase <= 0) return null;
     const estI = Math.round(pred30v);
     if (estI <= 0) return null;
-    let d = parseInt(String(days), 10);
-    if (!Number.isFinite(d)) d = 1;
-    const kp = Math.min(30, Math.max(1, d));
-    let rWin = snapRevCacheGet(cache, aid, kp);
-    if (rWin == null) rWin = revBase;
-    const pct = pred30v > 0 ? (rWin / pred30v) * 100 : null;
-    let s = Math.round(estI).toLocaleString('zh-CN');
-    if (pct != null && Number.isFinite(pct)) s += ` · 进度${Math.round(pct)}%`;
-    return s;
+    return Math.round(estI).toLocaleString('zh-CN');
   }
 
   function getOrBuildModelPack(genreRaw, topicRaw) {
@@ -1197,13 +1189,7 @@
     let est30Strong = '';
     let usedScript30 = false;
     let scriptProgressPct = null;
-    const formattedScript = format30dRevenueKpi(
-      state.snapCacheMain,
-      aid,
-      daysInt,
-      revModelBase,
-      pred30v,
-    );
+    const formattedScript = format30dRevenueKpi(revModelBase, pred30v);
     if (formattedScript) {
       est30Strong = formattedScript;
       usedScript30 = true;
@@ -1215,8 +1201,8 @@
         if (rWin == null) rWin = revModelBase;
         scriptProgressPct = Math.round((rWin / pred30v) * 100);
       }
-    } else if (linearEst.est != null && linearEst.progressPct != null) {
-      est30Strong = `${fmtInt(linearEst.est)} · 进度${linearEst.progressPct}%`;
+    } else if (linearEst.est != null) {
+      est30Strong = fmtInt(linearEst.est);
     } else {
       est30Strong = '—';
     }
