@@ -170,6 +170,504 @@
     return snapAll(rows, aid, n);
   }
 
+  // ─── 30 日收入预估 + 同品类分位（与 生成_人鱼全期结论表.py 口径对齐）────────────────
+  function buildSnapRevCache(rows) {
+    const c = Object.create(null);
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (val(r, '数据分类') !== '当前累计' || val(r, '是否目标用户') !== '全部') continue;
+      const aid = val(r, '活动标识');
+      const per = val(r, '数据周期');
+      if (!aid || !per) continue;
+      const rev = toNum(val(r, '总收入'));
+      c[`${aid}\x01${per}`] = rev != null && Number.isFinite(rev) ? rev : 0;
+    }
+    return c;
+  }
+
+  function snapRevCacheGet(cache, aid, nDays) {
+    const n = parseInt(String(nDays), 10);
+    if (!Number.isFinite(n) || n < 1) return null;
+    const key = `${String(aid || '').trim()}\x01上线${n}日内`;
+    const v = cache[key];
+    if (v == null || !Number.isFinite(v) || v <= 0) return null;
+    return v;
+  }
+
+  function buildSummaryMapFiltered(rows, genreFilter, topicFilter) {
+    const m = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!isSummaryAllRow(r)) continue;
+      if (genreFilter != null && genreFilter !== '' && val(r, '品类') !== genreFilter) continue;
+      if (topicFilter != null && topicFilter !== '' && val(r, '专题名称') !== topicFilter) continue;
+      const aid = val(r, '活动标识');
+      if (aid) m.set(aid, r);
+    }
+    return m;
+  }
+
+  function buildSummaryMap(rows, genreFilter) {
+    return buildSummaryMapFiltered(rows, genreFilter, null);
+  }
+
+  function medianNum(arr) {
+    if (!arr || !arr.length) return null;
+    const a = arr.slice().sort((x, y) => x - y);
+    const mid = Math.floor(a.length / 2);
+    return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+  }
+
+  function ratioClipVal(r) {
+    return Math.max(0.35, Math.min(8, r));
+  }
+
+  function blendMultiplier30d(fishRatios, catRatios) {
+    const mf = medianNum(fishRatios);
+    const mc = medianNum(catRatios);
+    if (mf != null && mc != null) return 0.55 * mf + 0.45 * mc;
+    if (mf != null) return mf;
+    if (mc != null) return mc;
+    return 30 / 9;
+  }
+
+  function collectR30OverR9Ratios(cache, summaryMap) {
+    const out = [];
+    summaryMap.forEach((summ, aid) => {
+      const d = Math.floor(toNum(val(summ, '已上线天数')) || 0);
+      if (d < 30) return;
+      const r9 = snapRevCacheGet(cache, aid, 9);
+      const r30 = snapRevCacheGet(cache, aid, 30);
+      if (r9 == null || r30 == null || r9 <= 0) return;
+      const ratio = r30 / r9;
+      if (ratio >= 0.35 && ratio <= 8) out.push(ratio);
+    });
+    return out;
+  }
+
+  function loocvBlendK(bt, idx, catR30R9) {
+    const ratios = [];
+    for (let j = 0; j < bt.length; j++) {
+      if (j === idx) continue;
+      ratios.push(ratioClipVal(bt[j].r30 / bt[j].r9));
+    }
+    return blendMultiplier30d(ratios, catR30R9);
+  }
+
+  function mapeMdapePair(preds, trues) {
+    const apes = [];
+    for (let i = 0; i < preds.length; i++) {
+      const p = preds[i];
+      const t = trues[i];
+      if (t > 0 && p != null && p > 0) apes.push((Math.abs(p - t) / t) * 100);
+    }
+    if (!apes.length) return null;
+    const mean = apes.reduce((a, b) => a + b, 0) / apes.length;
+    const s = apes.slice().sort((x, y) => x - y);
+    const md = s[Math.floor(s.length / 2)];
+    return { mean, md };
+  }
+
+  function buildFishBacktestRows(cacheMain, summaryMap, rows) {
+    const out = [];
+    summaryMap.forEach((summ, aid) => {
+      const d = Math.floor(toNum(val(summ, '已上线天数')) || 0);
+      if (d < 30) return;
+      const r9 = snapRevCacheGet(cacheMain, aid, 9);
+      const r30 = snapRevCacheGet(cacheMain, aid, 30);
+      if (r9 == null || r30 == null || r9 <= 0 || r30 <= 0) return;
+      const sn = snapAll(rows, aid, 9);
+      if (!sn.pa) return;
+      const pa9 = sn.pa;
+      const j = rate01(val(pa9, '参与付费率'));
+      const th = rate01(val(pa9, '目标触达率'));
+      out.push({
+        aid,
+        r9,
+        r30,
+        days: d,
+        tgt_hit: th != null ? th : 0,
+        t_arpu: toNum(val(pa9, '触达ARPU')) || 0,
+        tgt_arpu: toNum(val(pa9, '目标付费ARPU')) || 0,
+        join_pay: j != null ? j : 0,
+        tgt_uv: toNum(val(pa9, '目标用户数')) || 0,
+      });
+    });
+    return out;
+  }
+
+  function solveLinearSystem(A, b) {
+    const n = b.length;
+    const M = [];
+    for (let i = 0; i < n; i++) M.push(A[i].concat(b[i]));
+    for (let col = 0; col < n; col++) {
+      let pivot = col;
+      for (let r = col + 1; r < n; r++) {
+        if (Math.abs(M[r][col]) > Math.abs(M[pivot][col])) pivot = r;
+      }
+      if (Math.abs(M[pivot][col]) < 1e-12) return null;
+      if (pivot !== col) {
+        const t = M[col];
+        M[col] = M[pivot];
+        M[pivot] = t;
+      }
+      const div = M[col][col];
+      for (let j = col; j <= n; j++) M[col][j] /= div;
+      for (let r = 0; r < n; r++) {
+        if (r === col) continue;
+        const f = M[r][col];
+        if (f === 0) continue;
+        for (let j = col; j <= n; j++) M[r][j] -= f * M[col][j];
+      }
+    }
+    return M.map((row) => row[n]);
+  }
+
+  function lstsqOlsBeta(bt, keysFeat) {
+    const m = bt.length;
+    const p = 1 + keysFeat.length;
+    const Xa = [];
+    const yv = [];
+    for (let i = 0; i < m; i++) {
+      const row = bt[i];
+      yv.push(row.r30 / row.r9);
+      const x = [1];
+      for (let k = 0; k < keysFeat.length; k++) x.push(row[keysFeat[k]]);
+      Xa.push(x);
+    }
+    const XtX = [];
+    const Xty = [];
+    for (let i = 0; i < p; i++) {
+      XtX[i] = [];
+      for (let j = 0; j < p; j++) {
+        let s = 0;
+        for (let k = 0; k < m; k++) s += Xa[k][i] * Xa[k][j];
+        XtX[i][j] = s;
+      }
+      let sy = 0;
+      for (let k = 0; k < m; k++) sy += Xa[k][i] * yv[k];
+      Xty[i] = sy;
+    }
+    return solveLinearSystem(XtX, Xty);
+  }
+
+  function run30dModelBacktest(bt, catR30R9) {
+    if (!bt.length) return null;
+    const trues = bt.map((r) => r.r30);
+    const n = bt.length;
+    const rows = {};
+
+    const predsLin = bt.map((r) => r.r9 * (30 / 9));
+    rows.linear_30_9 = {
+      label: '线性外推 30/9（无业务特征）',
+      preds: predsLin,
+      mape: mapeMdapePair(predsLin, trues),
+    };
+
+    const kCat = medianNum(catR30R9) || 30 / 9;
+    const predsCat = bt.map((r) => r.r9 * kCat);
+    rows.cat_median_k = {
+      label: '对标池 R30/R9 中位数 k（全局常数）',
+      preds: predsCat,
+      mape: mapeMdapePair(predsCat, trues),
+    };
+
+    const predsFish = [];
+    for (let i = 0; i < n; i++) {
+      const ratios = [];
+      for (let j = 0; j < n; j++) {
+        if (j === i) continue;
+        ratios.push(ratioClipVal(bt[j].r30 / bt[j].r9));
+      }
+      const kf = medianNum(ratios) || kCat;
+      predsFish.push(bt[i].r9 * kf);
+    }
+    rows.fish_loocv_median = {
+      label: '监测同品类往期留一法 R30/R9 中位 k',
+      preds: predsFish,
+      mape: mapeMdapePair(predsFish, trues),
+    };
+
+    const predsBlend = [];
+    for (let i = 0; i < n; i++) {
+      predsBlend.push(bt[i].r9 * loocvBlendK(bt, i, catR30R9));
+    }
+    rows.blend_loocv = {
+      label: '往期留一 + 对标池混合 k（0.55/0.45）',
+      preds: predsBlend,
+      mape: mapeMdapePair(predsBlend, trues),
+    };
+
+    const predsArpu = [];
+    for (let i = 0; i < n; i++) {
+      const k = loocvBlendK(bt, i, catR30R9);
+      const others = [];
+      for (let j = 0; j < n; j++) {
+        if (j !== i && bt[j].t_arpu > 0) others.push(bt[j].t_arpu);
+      }
+      const medT = medianNum(others) || bt[i].t_arpu || 1;
+      let adj = medT > 0 ? bt[i].t_arpu / medT : 1;
+      adj = Math.max(0.65, Math.min(1.35, adj));
+      predsArpu.push(bt[i].r9 * k * adj);
+    }
+    rows.arpu_tuned_loocv = {
+      label: '混合 k × 触达 ARPU 相对留一中位校正',
+      preds: predsArpu,
+      mape: mapeMdapePair(predsArpu, trues),
+    };
+
+    const predsJoin = [];
+    for (let i = 0; i < n; i++) {
+      const k = loocvBlendK(bt, i, catR30R9);
+      const others = [];
+      for (let j = 0; j < n; j++) {
+        if (j !== i && bt[j].join_pay > 0) others.push(bt[j].join_pay);
+      }
+      const medJ = medianNum(others) || bt[i].join_pay || 0.2;
+      let adj = medJ > 0 ? bt[i].join_pay / medJ : 1;
+      adj = Math.max(0.65, Math.min(1.35, adj));
+      predsJoin.push(bt[i].r9 * k * adj);
+    }
+    rows.join_tuned_loocv = {
+      label: '混合 k × 参与付费率相对留一中位校正',
+      preds: predsJoin,
+      mape: mapeMdapePair(predsJoin, trues),
+    };
+
+    const keysFeat = ['tgt_hit', 't_arpu', 'tgt_arpu', 'join_pay'];
+    const predsOls = [];
+    if (n >= 7) {
+      for (let i = 0; i < n; i++) {
+        const train = bt.filter((_, j) => j !== i);
+        if (train.length < 6) {
+          predsOls.push(bt[i].r9 * loocvBlendK(bt, i, catR30R9));
+          continue;
+        }
+        const beta = lstsqOlsBeta(train, keysFeat);
+        if (!beta) {
+          predsOls.push(bt[i].r9 * loocvBlendK(bt, i, catR30R9));
+          continue;
+        }
+        const xi = [
+          1,
+          bt[i].tgt_hit,
+          bt[i].t_arpu,
+          bt[i].tgt_arpu,
+          bt[i].join_pay,
+        ];
+        let rr = 0;
+        for (let t = 0; t < xi.length; t++) rr += xi[t] * beta[t];
+        predsOls.push(bt[i].r9 * ratioClipVal(rr));
+      }
+    }
+    rows.ols_9d_feats = {
+      label: 'OLS：目标触达率+触达ARPU+目标付费ARPU+参与付费率→R30/R9',
+      preds: n >= 7 && predsOls.length === n ? predsOls : null,
+      mape:
+        n >= 7 && predsOls.length === n ? mapeMdapePair(predsOls, trues) : null,
+    };
+
+    let bestKey = null;
+    let bestMape = Infinity;
+    Object.keys(rows).forEach((key) => {
+      const mm = rows[key].mape;
+      if (!mm || mm.mean == null) return;
+      if (mm.mean < bestMape) {
+        bestMape = mm.mean;
+        bestKey = key;
+      }
+    });
+    if (!bestKey) bestKey = 'blend_loocv';
+    return { bt, rows, winner: bestKey, trues };
+  }
+
+  function paFeatsFromRow(pa) {
+    if (!pa) return { tgt_hit: 0, t_arpu: 0, tgt_arpu: 0, join_pay: 0 };
+    const th = rate01(val(pa, '目标触达率'));
+    const j = rate01(val(pa, '参与付费率'));
+    return {
+      tgt_hit: th != null ? th : 0,
+      t_arpu: toNum(val(pa, '触达ARPU')) || 0,
+      tgt_arpu: toNum(val(pa, '目标付费ARPU')) || 0,
+      join_pay: j != null ? j : 0,
+    };
+  }
+
+  function buildProd30dPredictor(winnerKey, bt, catR30R9, fishR30R9) {
+    const kGlobal = blendMultiplier30d(fishR30R9, catR30R9);
+    const kFish = medianNum(fishR30R9) || kGlobal;
+    const kCat = medianNum(catR30R9) || kGlobal;
+    let medT = medianNum(bt.map((r) => r.t_arpu).filter((x) => x > 0)) || 1;
+    let medJ = medianNum(bt.map((r) => r.join_pay).filter((x) => x > 0)) || 0.2;
+    if (medT <= 0) medT = 1;
+    if (medJ <= 0) medJ = 0.2;
+
+    const keysFeat = ['tgt_hit', 't_arpu', 'tgt_arpu', 'join_pay'];
+    let betaProd = null;
+    let rankProdOk = false;
+    if (winnerKey === 'ols_9d_feats' && bt && bt.length >= 6) {
+      betaProd = lstsqOlsBeta(bt, keysFeat);
+      rankProdOk = !!betaProd;
+    }
+
+    return function pred30(rev9, pa) {
+      if (!rev9 || rev9 <= 0) return null;
+      const f = paFeatsFromRow(pa);
+      if (winnerKey === 'linear_30_9') return rev9 * (30 / 9);
+      if (winnerKey === 'cat_median_k') return rev9 * kCat;
+      if (winnerKey === 'fish_loocv_median') return rev9 * kFish;
+      if (winnerKey === 'blend_loocv') return rev9 * kGlobal;
+      if (winnerKey === 'arpu_tuned_loocv') {
+        const adj = Math.max(
+          0.65,
+          Math.min(1.35, medT > 0 ? f.t_arpu / medT : 1),
+        );
+        return rev9 * kGlobal * adj;
+      }
+      if (winnerKey === 'join_tuned_loocv') {
+        const adj = Math.max(
+          0.65,
+          Math.min(1.35, medJ > 0 ? f.join_pay / medJ : 1),
+        );
+        return rev9 * kGlobal * adj;
+      }
+      if (winnerKey === 'ols_9d_feats' && rankProdOk && betaProd) {
+        const xi = [1, f.tgt_hit, f.t_arpu, f.tgt_arpu, f.join_pay];
+        let rr = 0;
+        for (let t = 0; t < xi.length; t++) rr += xi[t] * betaProd[t];
+        return rev9 * ratioClipVal(rr);
+      }
+      return rev9 * kGlobal;
+    };
+  }
+
+  function format30dRevenueKpi(cache, aid, days, revBase, pred30v) {
+    if (pred30v == null || pred30v <= 0 || !revBase || revBase <= 0) return null;
+    const estI = Math.round(pred30v);
+    if (estI <= 0) return null;
+    let d = parseInt(String(days), 10);
+    if (!Number.isFinite(d)) d = 1;
+    const kp = Math.min(30, Math.max(1, d));
+    let rWin = snapRevCacheGet(cache, aid, kp);
+    if (rWin == null) rWin = revBase;
+    const pct = pred30v > 0 ? (rWin / pred30v) * 100 : null;
+    let s = Math.round(estI).toLocaleString('zh-CN');
+    if (pct != null && Number.isFinite(pct)) s += ` · 进度${Math.round(pct)}%`;
+    return s;
+  }
+
+  function getOrBuildModelPack(genreRaw, topicRaw) {
+    const g =
+      genreRaw && String(genreRaw).trim() && String(genreRaw).trim() !== '—'
+        ? String(genreRaw).trim()
+        : '';
+    const t =
+      topicRaw && String(topicRaw).trim() ? String(topicRaw).trim() : '';
+    const key = `${g || '__G__'}\x01${t || '__T__'}`;
+    if (state.modelPackByGenre.has(key)) return state.modelPackByGenre.get(key);
+
+    const cacheMain = state.snapCacheMain;
+    const cacheBench = buildSnapRevCache(state.benchRows);
+    const summaryMainG = buildSummaryMapFiltered(
+      state.rows,
+      g !== '' ? g : null,
+      t !== '' ? t : null,
+    );
+    const summaryBenchG = buildSummaryMap(state.benchRows, g !== '' ? g : null);
+    const fishR30R9 = collectR30OverR9Ratios(cacheMain, summaryMainG);
+    const catR30R9 = collectR30OverR9Ratios(cacheBench, summaryBenchG);
+    const bt = buildFishBacktestRows(cacheMain, summaryMainG, state.rows);
+    const calibration = bt.length ? run30dModelBacktest(bt, catR30R9) : null;
+    const winKey = calibration ? calibration.winner : 'blend_loocv';
+    const predFn = buildProd30dPredictor(winKey, bt, catR30R9, fishR30R9);
+    const pack = {
+      calibration,
+      predFn,
+      winKey,
+      fishR30R9,
+      catR30R9,
+      genreKey: key,
+    };
+    state.modelPackByGenre.set(key, pack);
+    return pack;
+  }
+
+  function percentileRankSameGenre(currentRev, genreRaw) {
+    if (currentRev == null || !Number.isFinite(currentRev) || currentRev <= 0) return null;
+    const g =
+      genreRaw && String(genreRaw).trim() && String(genreRaw).trim() !== '—'
+        ? String(genreRaw).trim()
+        : '';
+    const sm = buildSummaryMap(state.rows, g || null);
+    const sb = buildSummaryMap(state.benchRows, g || null);
+    const all = new Map([...sm.entries(), ...sb.entries()]);
+    const vals = [];
+    all.forEach((summ, aid) => {
+      const d = Math.floor(toNum(val(summ, '已上线天数')) || 0);
+      if (d < 1) return;
+      const r = snapRevCacheGet(state.snapCacheMerged, aid, d);
+      if (r != null && r > 0 && Number.isFinite(r)) vals.push(r);
+    });
+    if (!vals.length) return null;
+    vals.sort((a, b) => a - b);
+    let lo = 0;
+    let hi = vals.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (vals[mid] < currentRev) lo = mid + 1;
+      else hi = mid;
+    }
+    return (100 * lo) / vals.length;
+  }
+
+  function buildCalibNoteHtml(calibration, genreLabel) {
+    const benchLabel = '对标池';
+    const subj = esc(genreLabel || '本品类');
+    if (!calibration || !calibration.bt || !calibration.bt.length) {
+      return (
+        '<p class="exec-calib-note">' +
+        subj +
+        ' 在监测数据中尚无「已上线≥30 天且 9 日/30 日收入齐全」的满月样本；30 日预估使用<strong>监测往期与' +
+        benchLabel +
+        '</strong>混合 k 外推（与脚本无样本时一致）。</p>'
+      );
+    }
+    const wk = calibration.winner;
+    const metaW = calibration.rows[wk];
+    const mm = metaW && metaW.mape;
+    const lines = [];
+    const keys = Object.keys(calibration.rows).sort();
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const meta = calibration.rows[k];
+      const m = meta.mape;
+      if (!m || m.mean == null) continue;
+      const mark = k === wk ? '★ ' : '';
+      lines.push(
+        mark +
+          esc(meta.label) +
+          ' — MAPE ' +
+          m.mean.toFixed(1) +
+          '% · MdAPE ' +
+          m.md.toFixed(1) +
+          '%',
+      );
+    }
+    const table = lines.join('<br />');
+    const head =
+      '<p class="exec-calib-note"><strong>30 日收入预估</strong>已用监测内<strong>同品类往期</strong>真实 30 日累计做留一法回测，并对标<strong>整体数据监测同夹池表</strong>的 R30/R9；' +
+      '满月可评样本 <strong>' +
+      calibration.bt.length +
+      '</strong> 期，选用 MAPE 最低：<strong>' +
+      esc(calibration.rows[wk].label) +
+      '</strong>（MAPE ' +
+      (mm && mm.mean != null ? mm.mean.toFixed(1) : '—') +
+      '%）。<br />' +
+      table +
+      '</p>';
+    return head;
+  }
+
   /**
    * 与脚本一致：只认「汇总 / 汇总 / 全部」汇总行；同一专题下同一活动标识只保留一行（取期次更大者），
    * 避免导出重复行把「期数」和「专题数」撑大。
@@ -230,6 +728,10 @@
   let state = {
     rows: [],
     benchRows: [],
+    mergedRows: [],
+    snapCacheMain: Object.create(null),
+    snapCacheMerged: Object.create(null),
+    modelPackByGenre: new Map(),
     layerRows: [],
     workRows: [],
     topics: [],
@@ -331,7 +833,7 @@
     return { est, progressPct };
   }
 
-  function oneLinerText(pa, nSnap) {
+  function oneLinerText(pa, nSnap, catPr, usedScript30) {
     if (!pa) {
       return (
         '未匹配到「当前累计·上线' +
@@ -352,14 +854,23 @@
       );
     }
     if (t != null) bits.push('目标触达率约 ' + (t * 100).toFixed(1) + '%');
-    bits.push(
-      '顶栏「预估30日收入」为 n 日累计线性外推；同品类分位与多模型预测需载入对标池等数据后另行扩展',
-    );
+    if (usedScript30) {
+      bits.push(
+        '顶栏「预估30日」与静态页一致：同品类往期留一法比 MAPE 选模型，并混入整体数据监测同夹对标池的 R30/R9。',
+      );
+    } else {
+      bits.push(
+        '30 日预估当前为线性外推（同品类满月可评样本或 9 日/30 日快照不足时）；保证监测内有「上线满 30 天」活动且存在 上线9日/30日 收入列后可启用多模型。',
+      );
+    }
+    if (catPr != null) {
+      bits.push('同期累计收入在同品类样本（监测往期 + 同夹池表）中约超 ' + catPr.toFixed(0) + '% 的活动。');
+    }
     return bits.join('；') + '。';
   }
 
   /** ⑤ 综合判断：基于当前快照可计算的指标生成要点，不依赖外部 HTML。 */
-  function buildSynthesisModuleHtml(pa, pyes, est30) {
+  function buildSynthesisModuleHtml(pa, pyes, synthCtx) {
     if (!pa) {
       return (
         '<ol class="review-conclusions">' +
@@ -367,6 +878,11 @@
         '</ol>'
       );
     }
+    const linearEst = synthCtx.linearEst;
+    const usedScript30 = synthCtx.usedScript30;
+    const scriptProgressPct = synthCtx.scriptProgressPct;
+    const catPr = synthCtx.catPr;
+
     const items = [];
     const join = rate01(val(pa, '参与付费率'));
     const tgt = rate01(val(pa, '目标触达率'));
@@ -393,14 +909,28 @@
     if (tgtUserShare != null) {
       items.push('目标用户收入占比约 ' + (tgtUserShare * 100).toFixed(1) + '%（「是否目标用户=是」行）。');
     }
-    if (est30.progressPct != null && est30.progressPct >= 90) {
+    const progShow =
+      usedScript30 && scriptProgressPct != null ? scriptProgressPct : linearEst.progressPct;
+    if (progShow != null && progShow >= 90) {
       items.push(
-        '线性外推进度约 ' +
-          est30.progressPct +
+        (usedScript30 ? '多模型预估' : '线性外推') +
+          '进度约 ' +
+          progShow +
           '%，可结合「收入目标达成度」评估是否接近收尾节奏。',
       );
     }
-    items.push('同品类分位、分层条形全文、作品明细曝光等依赖额外 CSV，本页当前未合并载入时不作对标结论。');
+    if (catPr != null) {
+      items.push(
+        '同期收入在同品类横向样本中约超 ' +
+          catPr.toFixed(0) +
+          '% 的活动（样本 = 监测内同品类往期 + 整体数据监测同夹对标池）。',
+      );
+    } else if (!state.benchRows.length) {
+      items.push(
+        '未检测到同夹对标池 CSV 时，分位与池侧 R30/R9 仅用监测表内同品类；可将池表放入「整体数据监测」文件夹。',
+      );
+    }
+    items.push('分层条形全文、作品明细曝光等仍依赖额外子目录 CSV，本页未合并载入。');
     return (
       '<ol class="review-conclusions">' +
       items.map((li) => '<li>' + esc(li) + '</li>').join('') +
@@ -472,11 +1002,62 @@
     const goalHtml =
       goalCell !== '' ? esc(goalCell) : '—<span class="kpi-level">（未录入）</span>';
 
-    const est30 = linearEst30Revenue(rev, n);
-    const est30Strong =
-      est30.est != null && est30.progressPct != null
-        ? `${fmtInt(est30.est)} · 进度${est30.progressPct}%<span class="kpi-level">（线性外推）</span>`
-        : '—<span class="kpi-level">（缺 n 日累计）</span>';
+    const nModel = Math.min(9, Math.max(1, daysInt));
+    const snapM = snapRowN(state.rows, aid, nModel);
+    const revModelBase =
+      snapM.pa && toNum(val(snapM.pa, '总收入')) != null
+        ? toNum(val(snapM.pa, '总收入'))
+        : rev;
+    const paModel = snapM.pa || pa;
+    const genreForModel = genre === '—' ? '' : genre;
+    const topicForModel = val(sumRow, '专题名称') || '';
+    const pack = getOrBuildModelPack(genreForModel, topicForModel);
+    let pred30v = null;
+    if (
+      revModelBase != null &&
+      revModelBase > 0 &&
+      paModel &&
+      typeof pack.predFn === 'function'
+    ) {
+      pred30v = pack.predFn(revModelBase, paModel);
+    }
+    const linearEst = linearEst30Revenue(rev, n);
+    let est30Strong = '';
+    let usedScript30 = false;
+    let scriptProgressPct = null;
+    const formattedScript = format30dRevenueKpi(
+      state.snapCacheMain,
+      aid,
+      daysInt,
+      revModelBase,
+      pred30v,
+    );
+    if (formattedScript) {
+      est30Strong =
+        formattedScript + '<span class="kpi-level">（与静态页同源多模型）</span>';
+      usedScript30 = true;
+      if (pred30v != null && pred30v > 0) {
+        let dProg = parseInt(String(daysInt), 10);
+        if (!Number.isFinite(dProg)) dProg = 1;
+        const kp = Math.min(30, Math.max(1, dProg));
+        let rWin = snapRevCacheGet(state.snapCacheMain, aid, kp);
+        if (rWin == null) rWin = revModelBase;
+        scriptProgressPct = Math.round((rWin / pred30v) * 100);
+      }
+    } else if (linearEst.est != null && linearEst.progressPct != null) {
+      est30Strong = `${fmtInt(linearEst.est)} · 进度${linearEst.progressPct}%<span class="kpi-level">（线性外推）</span>`;
+    } else {
+      est30Strong = '—<span class="kpi-level">（缺快照或预测条件）</span>';
+    }
+
+    const catPr =
+      rev != null && Number.isFinite(rev) && rev > 0
+        ? percentileRankSameGenre(rev, genre)
+        : null;
+    const calibBlock =
+      pa && pack
+        ? buildCalibNoteHtml(pack.calibration, genre === '—' ? '本品类' : genre)
+        : '';
 
     const kpiBlock = pa
       ? `<div class="period-kpis">
@@ -487,7 +1068,7 @@
           <div class="kpi-pill"><span class="kpi-l">付费抽卡人数</span><strong>${fmtInt(paidUv)}</strong></div>
           <div class="kpi-pill"><span class="kpi-l">付费抽人均抽数</span><strong>${ppd != null ? ppd.toFixed(2) : '—'}</strong></div>
           <div class="kpi-pill"><span class="kpi-l">付费ARPPU</span><strong>${arppu != null ? arppu.toFixed(2) : '—'}</strong></div>
-        </div>`
+        </div>${calibBlock}`
       : '<p class="review-mod-note">无当前累计快照，顶栏 KPI 略。</p>';
 
     const pps = pa ? toNum(val(pa, '付费单抽均价')) : null;
@@ -566,31 +1147,42 @@
       '</section>' +
       '<section class="mini-card" aria-label="收入节奏">' +
       '<h4 class="mini-card-title">收入节奏</h4>' +
-      '<p class="mini-con">同期累计 + 线性外推 30 日</p>' +
+      '<p class="mini-con">同期累计 + 30 日预估（多模型或线性）</p>' +
       '<div class="mini-stats"><div class="data-line">同期' +
       esc(String(n)) +
       '日累计收入 <strong>' +
       fmtInt(rev) +
       '</strong></div>' +
-      (est30.est != null
+      (pred30v != null && pred30v > 0
+        ? '<div class="data-line">多模型预估 30 日累计 <strong>' +
+          fmtInt(Math.round(pred30v)) +
+          '</strong>（与生成脚本留一法一致）</div>'
+        : '') +
+      (linearEst.est != null && !(pred30v != null && pred30v > 0)
         ? '<div class="data-line">线性预估 30 日累计 <strong>' +
-          fmtInt(est30.est) +
+          fmtInt(linearEst.est) +
           '</strong>｜进度 <strong>' +
-          esc(String(est30.progressPct)) +
+          esc(String(linearEst.progressPct)) +
           '%</strong></div>'
         : '') +
       '</div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">预估 = 当前 n 日累计 ÷ n × 30；进度 = 当前累计 ÷ 预估。多模型拟合需另行扩展。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">多模型时基线为「上线 min(9,已上线天数) 日内」收入 × 校准 k；进度分子为 min(30,已上线天数) 日内累计。线性兜底为 n 日累计 ÷ n × 30。</div></details>' +
       '</section>' +
       '<section class="mini-card" aria-label="同品类表现">' +
       '<h4 class="mini-card-title">同品类表现</h4>' +
-      '<p class="mini-con">浏览器未加载对标池 CSV</p>' +
+      '<p class="mini-con">' +
+      (state.benchRows.length
+        ? '监测同品类往期 + 同夹对标池'
+        : '监测内同品类往期（无同夹池表）') +
+      '</p>' +
       '<div class="mini-stats"><div class="data-line">同期' +
       esc(String(n)) +
-      '日收入分位 <strong>—</strong>｜参与付费率 <strong>' +
+      '日收入分位 <strong>' +
+      (catPr != null ? '约超 ' + catPr.toFixed(0) + '%' : '—') +
+      '</strong>｜参与付费率 <strong>' +
       (join != null ? fmtPct(join) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">同期 n 日收入分位需合并对标池 CSV 后计算，当前未载入故显示为「—」。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">分位：同「品类」下各活动按自身「已上线天数」取「当前累计·上线 n 日内·全部」收入排序，看本期同期 n 日收入约超多少比例样本（监测合并表 + 同夹池表去重）。</div></details>' +
       '</section>' +
       '</div>';
 
@@ -603,7 +1195,7 @@
       `<span class="period-sub">${esc(genre)} · 已上线 ${esc(daysOnline)} 天 · 表内对比 ${esc(String(n))} 日</span>` +
       '</div>' +
       '<p class="period-one-liner"><span class="one-liner-label">一句话总结</span>' +
-      oneLinerText(pa, n) +
+      oneLinerText(pa, n, catPr, usedScript30) +
       '</p>' +
       kpiBlock +
       '</header>' +
@@ -633,12 +1225,17 @@
       '</section>' +
       '<section class="review-mod review-mod--synthesis">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">⑤</span> 综合判断（跨维度）</h3>' +
-      buildSynthesisModuleHtml(pa, pyes, est30) +
+      buildSynthesisModuleHtml(pa, pyes, {
+        linearEst,
+        usedScript30,
+        scriptProgressPct,
+        catPr,
+      }) +
       '</section>' +
       '</div>' +
       '<details class="period-metrics-fold">' +
       '<summary class="period-metrics-fold-sum">展开 / 收起 ⑥ 六格指标明细</summary>' +
-      '<p class="review-grid-hint">以下为 <strong>⑥</strong> 六格摘要，指标来自监测表「当前累计」快照行；预估为线性外推。</p>' +
+      '<p class="review-grid-hint">以下为 <strong>⑥</strong> 六格摘要；30 日预估优先为与静态页一致的多模型留一法，否则为线性外推。</p>' +
       miniGrid +
       '</details>' +
       '</article>'
@@ -852,8 +1449,8 @@
       (periods.length > 1
         ? '；另有 <strong>' + esc(String(periods.length - 1)) + '</strong> 期请在下方折叠区展开查看。'
         : '。') +
-      ' 大表已自动<strong>仅保留汇总行与「当前累计·上线 n 日内」快照</strong>（n 与表内一致，并设合理上限）以降低崩溃风险。' +
-      ' 顶栏「预估30日」为线性外推。</p>' +
+      ' 大表已自动<strong>仅保留汇总行与「当前累计·上线 n 日内」快照</strong>（含 9/30 日等用于多模型与分位）。' +
+      ' 顶栏「预估30日」与静态页一致：<strong>同品类往期留一法</strong>并混入<strong>整体数据监测同夹对标池</strong> R30/R9。</p>' +
       '<div class="fish-period-stack">' +
       latestBoard +
       '</div>' +
@@ -947,23 +1544,44 @@
     renderDetail(name);
   }
 
+  function ingestCsvParts(parts, labelPrefix) {
+    let merged = [];
+    let scanned = 0;
+    let kept = 0;
+    if (!parts || !parts.length) return { merged, scanned, kept };
+    for (let pi = 0; pi < parts.length; pi++) {
+      const one = parseMonitoringCsvToAllRows(parts[pi].text, parts[pi].name || labelPrefix);
+      scanned += one.scanned;
+      kept += one.kept;
+      merged = merged.concat(one.rows);
+    }
+    return { merged, scanned, kept };
+  }
+
   async function loadFromBinding() {
     const status = $('wishReviewDashStatus');
     const src = $('wishReviewDashSource');
-    const readFn = window.wishReviewReadMonitorCsv;
+    const readBundle = window.wishReviewReadMonitorAndBenchCsv;
+    const readMainOnly = window.wishReviewReadMonitorCsv;
+    const readFn = typeof readBundle === 'function' ? readBundle : readMainOnly;
     if (!readFn) {
       if (status) status.textContent = '脚本未就绪。';
       return;
     }
     if (status) {
-      status.textContent = '正在解析整体数据监测（仅保留汇总与「上线 n 日内」快照行，降低内存）…';
+      status.textContent =
+        '正在解析整体数据监测（监测表 + 同夹对标池；仅保留汇总与上线 n 日内快照）…';
     }
-    const mainBlock = await readFn();
-    if (!mainBlock.ok) {
-      if (status) status.textContent = mainBlock.error || '读取失败';
+    const raw = await readFn();
+    if (!raw.ok) {
+      if (status) status.textContent = raw.error || '读取失败';
       if (src) src.textContent = '';
       state.rows = [];
       state.benchRows = [];
+      state.mergedRows = [];
+      state.snapCacheMain = Object.create(null);
+      state.snapCacheMerged = Object.create(null);
+      state.modelPackByGenre.clear();
       state.layerRows = [];
       state.workRows = [];
       state.topics = [];
@@ -972,18 +1590,24 @@
       renderDetail(null);
       return;
     }
+
+    const isBundle = raw.main && raw.bench;
+    const mainBlock = isBundle ? raw.main : raw;
     const parts = mainBlock.parts && mainBlock.parts.length ? mainBlock.parts : null;
+
     let mergedRows = [];
     let csvScannedTotal = 0;
     let csvKeptBeforeDedupe = 0;
+    let benchMerged = [];
+    let benchScanned = 0;
+    let benchKept = 0;
+
     try {
       if (parts) {
-        for (let pi = 0; pi < parts.length; pi++) {
-          const one = parseMonitoringCsvToAllRows(parts[pi].text, parts[pi].name);
-          csvScannedTotal += one.scanned;
-          csvKeptBeforeDedupe += one.kept;
-          mergedRows = mergedRows.concat(one.rows);
-        }
+        const ing = ingestCsvParts(parts, '监测');
+        mergedRows = ing.merged;
+        csvScannedTotal = ing.scanned;
+        csvKeptBeforeDedupe = ing.kept;
       } else if (mainBlock.text) {
         const one = parseMonitoringCsvToAllRows(
           mainBlock.text,
@@ -998,25 +1622,44 @@
         }
         return;
       }
+
+      if (isBundle && raw.bench && raw.bench.parts && raw.bench.parts.length) {
+        const ingB = ingestCsvParts(raw.bench.parts, '对标池');
+        benchMerged = ingB.merged;
+        benchScanned = ingB.scanned;
+        benchKept = ingB.kept;
+        csvScannedTotal += benchScanned;
+        csvKeptBeforeDedupe += benchKept;
+      }
     } catch (e) {
       if (status) status.textContent = 'CSV 解析失败';
       return;
     }
+
     clearFunnelRowCache();
+    state.modelPackByGenre.clear();
     state.rows = dedupeMonitoringRows(mergedRows);
-    state.benchRows = [];
+    state.benchRows = dedupeMonitoringRows(benchMerged);
+    state.mergedRows = dedupeMonitoringRows(mergedRows.concat(benchMerged));
+    state.snapCacheMain = buildSnapRevCache(state.rows);
+    state.snapCacheMerged = buildSnapRevCache(state.mergedRows);
     state.layerRows = [];
     state.workRows = [];
+
+    const lastMod = isBundle ? raw.lastModified || mainBlock.lastModified : mainBlock.lastModified;
+
     if (typeof window !== 'undefined') {
       window.__WISH_REVIEW_BUNDLE_DATA__ = {
         mainRowCount: state.rows.length,
+        benchRowCount: state.benchRows.length,
+        mergedRowCount: state.mergedRows.length,
         csvScannedRows: csvScannedTotal,
         csvKeptBeforeDedupeRows: csvKeptBeforeDedupe,
-        benchRowCount: 0,
         layerRowCount: 0,
         workRowCount: 0,
         loadedAt: Date.now(),
-        note: '监测 CSV 已过滤为汇总+快照行；详情默认最新一期，历史期次展开后生成。',
+        note:
+          '30 日预估与分位：监测同品类往期 + 整体数据监测同夹对标池；与生成脚本口径一致（留一法选模型）。',
       };
     }
     const built = buildTopicModels(state.rows);
@@ -1026,33 +1669,44 @@
     state.fileNames =
       mainBlock.fileNames ||
       (parts ? parts.map((p) => p.name) : mainBlock.fileName ? [mainBlock.fileName] : []);
-    const mtime = new Date(mainBlock.lastModified).toLocaleString('zh-CN', { hour12: false });
+    const mtime = new Date(lastMod || 0).toLocaleString('zh-CN', { hour12: false });
     const nFiles = parts ? parts.length : 1;
+    const benchHint =
+      state.benchRows.length > 0
+        ? `；已合并对标池 ${state.benchRows.length} 行`
+        : '；未检测到同夹对标池 CSV（分位/池 R30/R9 仅用监测内同品类）';
     if (status) {
       const n = (x) => (x != null ? Math.round(x).toLocaleString('zh-CN') : '0');
       const scanHint =
         csvScannedTotal > 0
-          ? ` · CSV 扫描 ${n(csvScannedTotal)} 行 → 规则保留 ${n(csvKeptBeforeDedupe)} → 去重后 ${n(state.rows.length)}`
+          ? ` · CSV 扫描 ${n(csvScannedTotal)} 行 → 规则保留 ${n(csvKeptBeforeDedupe)} → 监测去重 ${n(state.rows.length)}`
           : '';
       status.textContent =
         (nFiles > 1
-          ? `已合并 ${nFiles} 个监测 CSV → ${n(state.rows.length)} 行（跨文件去重后）`
-          : `已加载 ${n(state.rows.length)} 行`) +
+          ? `已合并 ${nFiles} 个监测 CSV → ${state.rows.length} 行（去重后）`
+          : `已加载监测 ${state.rows.length} 行`) +
         scanHint +
+        benchHint +
         ` · ${built.topicCount} 个专题 · ${built.activityDedupCount} 个祈愿活动` +
-        `（汇总·全部 原始 ${built.rawSummaryCount} 行，专题内按活动标识去重）` +
-        ' · 右侧默认最新一期；对标池/分层/作品明细等未合并载入';
+        `（汇总·全部 原始 ${built.rawSummaryCount} 行）` +
+        ' · 右侧默认最新一期';
     }
     if (src) {
-      const label =
+      const mainLabel =
         mainBlock.fileNames && mainBlock.fileNames.length
           ? mainBlock.fileNames.join(' + ')
           : mainBlock.fileName || (parts && parts.map((p) => p.name).join(' + ')) || '—';
-      src.textContent = `${label} · ${mtime}`;
+      const benchLabel =
+        isBundle && raw.bench && raw.bench.fileNames && raw.bench.fileNames.length
+          ? raw.bench.fileNames.join(' + ')
+          : '';
+      src.textContent = benchLabel
+        ? `监测：${mainLabel}｜对标池：${benchLabel} · ${mtime}`
+        : `${mainLabel} · ${mtime}`;
     }
 
     // Cache mtime for auto refresh.
-    state.lastMainMonitorLastModified = mainBlock.lastModified || null;
+    state.lastMainMonitorLastModified = lastMod || null;
     ensureAutoRefresh();
 
     if (!state.selected || !state.topics.some((x) => x.name === state.selected)) {

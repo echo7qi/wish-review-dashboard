@@ -509,9 +509,71 @@ async function readMonitorCsvFromBoundRoot() {
   return { ok: true, ...finalizeCsvPartsResult(mainParts) };
 }
 
+/**
+ * 读取「整体数据监测」内：监测表（多文件合并）+ 同夹对标池 CSV（*池历史* 等），与生成脚本 data-bundle 约定一致。
+ */
+async function readMonitorAndBenchFromBoundRoot() {
+  const root = await getBoundDirHandle();
+  if (!root) {
+    return { ok: false, error: '尚未绑定数据文件夹。请先在左侧点击「绑定数据文件夹」。' };
+  }
+  const perm = await root.queryPermission?.({ mode: 'read' });
+  if (perm !== 'granted') {
+    const req = await root.requestPermission?.({ mode: 'read' });
+    if (req !== 'granted') {
+      return { ok: false, error: '未获得文件夹读取权限。' };
+    }
+  }
+  const review = await resolveReviewRootFromBoundRoot(root);
+  if (!review) {
+    return {
+      ok: false,
+      error: `未找到「${REVIEW_ROOT_CANDIDATES.join('」或「')}」文件夹。`,
+    };
+  }
+  const mainSub = await resolveFirstChildDir(review.handle, BUNDLE_SUBS.main);
+  if (!mainSub) {
+    return { ok: false, error: `未找到子文件夹「${BUNDLE_SUBS.main[0]}」。` };
+  }
+  const mainFiles = await listCsvWithMtime(mainSub.handle);
+  const mainMerge = listMonitoringCsvMetasForMerge(mainFiles);
+  if (!mainMerge.length) {
+    return {
+      ok: false,
+      error:
+        '「整体数据监测」内未找到可合并的监测 CSV（已排除文件名像品类池/历史池的对标表）。',
+    };
+  }
+  const mainParts = await readTextPartsFromDir(mainSub.handle, mainMerge);
+  const mainRes = { ok: true, ...finalizeCsvPartsResult(mainParts) };
+
+  const benchMerge = listBenchmarkCsvMetasForMerge(mainFiles);
+  let benchRes = {
+    ok: true,
+    parts: [],
+    fileNames: [],
+    fileName: '',
+    lastModified: 0,
+  };
+  if (benchMerge.length) {
+    const benchParts = await readTextPartsFromDir(mainSub.handle, benchMerge);
+    benchRes = { ok: true, ...finalizeCsvPartsResult(benchParts) };
+  }
+
+  const lm = mainRes.lastModified || 0;
+  const lb = benchRes.lastModified || 0;
+  return {
+    ok: true,
+    main: mainRes,
+    bench: benchRes,
+    lastModified: Math.max(lm, lb),
+  };
+}
+
 /** 慎用：会一次性读入监测同夹+分层+作品明细全部 CSV，数据大时易 OOM；看板默认只用 wishReviewReadMonitorCsv */
 window.wishReviewReadFullBundle = readFullWishReviewBundleFromBoundRoot;
 window.wishReviewReadMonitorCsv = readMonitorCsvFromBoundRoot;
+window.wishReviewReadMonitorAndBenchCsv = readMonitorAndBenchFromBoundRoot;
 window.wishReviewScanMonitorCsvMeta = scanMonitorCsvMetaFromBoundRoot;
 
 function onBindClick() {
