@@ -296,7 +296,7 @@
     );
   }
 
-  /** 与 fish 顶栏「进度」一致：预估30日 = n 日累计 × 30/n，进度 = 累计/预估 */
+  /** 预估30日 = n 日累计 × 30/n，进度 = 累计/预估（线性外推） */
   function linearEst30Revenue(revN, nDays) {
     if (revN == null || !Number.isFinite(revN) || revN < 0) {
       return { est: null, progressPct: null };
@@ -314,7 +314,7 @@
       return (
         '未匹配到「当前累计·上线' +
         esc(String(nSnap)) +
-        '日内·全部」快照；请核对导出列名或运行本地生成脚本。'
+        '日内·全部」快照；请核对监测表导出列名与活动标识是否一致。'
       );
     }
     const j = rate01(val(pa, '参与付费率'));
@@ -331,9 +331,59 @@
     }
     if (t != null) bits.push('目标触达率约 ' + (t * 100).toFixed(1) + '%');
     bits.push(
-      '顶栏「预估30日收入」按 n 日累计线性外推；脚本多模型预估请以本地生成 HTML 为准；同品类分位、与相邻期对比未在浏览器计算',
+      '顶栏「预估30日收入」为 n 日累计线性外推；同品类分位与多模型预测需载入对标池等数据后另行扩展',
     );
     return bits.join('；') + '。';
+  }
+
+  /** ⑤ 综合判断：基于当前快照可计算的指标生成要点，不依赖外部 HTML。 */
+  function buildSynthesisModuleHtml(pa, pyes, est30) {
+    if (!pa) {
+      return (
+        '<ol class="review-conclusions">' +
+        '<li>当前无「当前累计」快照行，无法生成综合判断；请检查监测表字段与活动标识。</li>' +
+        '</ol>'
+      );
+    }
+    const items = [];
+    const join = rate01(val(pa, '参与付费率'));
+    const tgt = rate01(val(pa, '目标触达率'));
+    let freeShare = null;
+    const fd = toNum(val(pa, '免费抽卡用户数'));
+    const du = toNum(val(pa, '抽卡用户数'));
+    if (fd != null && du != null && du > 0) freeShare = fd / du;
+    const tgtUserShare = pyes ? rate01(val(pyes, '对应人群收入占比')) : null;
+    if (join != null) {
+      if (join < 0.12) {
+        items.push('参与付费率偏低，可结合礼包/券结构（②）与触达（③）排查转化断点。');
+      } else if (join < 0.18) {
+        items.push('参与付费率中等略偏低，关注免费抽占比与进付费抽引导。');
+      } else {
+        items.push('参与付费率在监测快照中处于相对正常区间，可结合收入目标达成度持续观察。');
+      }
+    }
+    if (tgt != null) {
+      items.push('目标触达率约 ' + (tgt * 100).toFixed(1) + '%，可对照宣发与渠道效率（③）。');
+    }
+    if (freeShare != null && freeShare > 0.55 && join != null && join < 0.18) {
+      items.push('纯免费抽占比较高且付费转化一般时，建议复盘赠抽与付费入口设计。');
+    }
+    if (tgtUserShare != null) {
+      items.push('目标用户收入占比约 ' + (tgtUserShare * 100).toFixed(1) + '%（「是否目标用户=是」行）。');
+    }
+    if (est30.progressPct != null && est30.progressPct >= 90) {
+      items.push(
+        '线性外推进度约 ' +
+          est30.progressPct +
+          '%，可结合「收入目标达成度」评估是否接近收尾节奏。',
+      );
+    }
+    items.push('同品类分位、分层条形全文、作品明细曝光等依赖额外 CSV，本页当前未合并载入时不作对标结论。');
+    return (
+      '<ol class="review-conclusions">' +
+      items.map((li) => '<li>' + esc(li) + '</li>').join('') +
+      '</ol>'
+    );
   }
 
   function buildPeriodBoardArticle(sumRow) {
@@ -424,18 +474,18 @@
 
     const payOl =
       '<ol class="review-conclusions">' +
-      '<li>条形与监测表「当前累计·上线' +
+      '<li>条形数据与监测表「当前累计·上线' +
       esc(String(n)) +
-      '日内·全部」一致；解读句式与静态 fish 页同源逻辑请在本地脚本中生成。</li>' +
-      '<li>若参与付费率与纯免费抽占比同向异常，请结合赠抽与进付费抽引导复盘（与 fish 使用说明一致）。</li>' +
+      '日内·全部」快照行一致。</li>' +
+      '<li>若参与付费率与纯免费抽占比同向偏弱，可结合赠抽与进付费抽引导复盘。</li>' +
       '</ol>';
     const poolOl =
       '<ol class="review-conclusions">' +
-      '<li>礼/券/其余结构由堆叠条展示；完整有序结论与阈值提示见本地生成 HTML。</li>' +
+      '<li>礼包、祈愿券与其余收入占比由堆叠条展示；阈值与话术可结合业务口径在表外补充。</li>' +
       '</ol>';
     const launchOl =
       '<ol class="review-conclusions">' +
-      '<li>触达类指标与 fish ③ 块同源字段；宣发曝光与 pCTR 需作品明细表，浏览器未载入。</li>' +
+      '<li>触达类指标来自同一快照；宣发曝光与 pCTR 等需作品明细表字段，当前看板未合并载入。</li>' +
       '</ol>';
 
     const miniGrid =
@@ -450,7 +500,7 @@
       '日累计收入 <strong>' +
       fmtInt(rev) +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">n=min(9, 该期「已上线天数」取整)；与 Python 卡片对齐。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">n=min(9, 该期「已上线天数」取整)，与复盘卡片表内对比口径一致。</div></details>' +
       '</section>' +
       '<section class="mini-card" aria-label="触达效率">' +
       '<h4 class="mini-card-title">触达效率</h4>' +
@@ -462,7 +512,7 @@
       '</strong>｜目标触达率 <strong>' +
       (tgt != null ? fmtPct(tgt) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">与 fish ⑥ 触达小卡同源字段。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">触达 UV、ARPU、目标触达率等同监测表该快照行。</div></details>' +
       '</section>' +
       '<section class="mini-card" aria-label="客单价">' +
       '<h4 class="mini-card-title">客单价</h4>' +
@@ -508,7 +558,7 @@
           '%</strong></div>'
         : '') +
       '</div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">预估 = 当前 n 日累计 ÷ n × 30；进度 = 当前累计 ÷ 预估。与 Python 脚本中的混合 k / OLS 等模型可能不同。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">预估 = 当前 n 日累计 ÷ n × 30；进度 = 当前累计 ÷ 预估。多模型拟合需另行扩展。</div></details>' +
       '</section>' +
       '<section class="mini-card" aria-label="同品类表现">' +
       '<h4 class="mini-card-title">同品类表现</h4>' +
@@ -516,7 +566,7 @@
       '<div class="mini-stats"><div class="data-line">9日收入分位 <strong>—</strong>｜参与付费率 <strong>' +
       (join != null ? fmtPct(join) : '—') +
       '</strong></div></div>' +
-      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">与人鱼静态页一致的分位与话术需 <code>漫改耽美池</code> 等文件，请本地运行生成脚本。</div></details>' +
+      '<details class="mini-details"><summary>展开说明</summary><div class="detail-inner">9 日收入分位等需合并对标池 CSV 后计算，当前未载入故显示为「—」。</div></details>' +
       '</section>' +
       '</div>';
 
@@ -534,7 +584,7 @@
       kpiBlock +
       '</header>' +
       '<div class="review-modules">' +
-      '<p class="review-mod-note">阅读顺序：模块1（用户触达）→①②③④⑤；⑥ 为下方折叠区。版式对齐 fish-wish-review.html。</p>' +
+      '<p class="review-mod-note">阅读顺序：模块1（用户触达）→①②③④⑤；⑥ 为下方折叠区。</p>' +
       buildUserReachFunnelsModuleHtml(sumRow) +
       '<div class="review-mod-grid">' +
       '<section class="review-mod">' +
@@ -555,18 +605,16 @@
       '</div>' +
       '<section class="review-mod review-mod--layer">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 付费分层表现</h3>' +
-      '<p class="review-mod-note">未在浏览器加载《② 分层用户监测》全文（控内存）。分层表与条形要点与 fish ④ 一致时请本地运行 <code>生成_人鱼全期结论表.py --data-bundle</code>。</p>' +
+      '<p class="review-mod-note">「分层用户监测」CSV 未合并载入本页（控内存与性能）。需要分层条形时可在后续版本扩展读取该子目录。</p>' +
       '</section>' +
       '<section class="review-mod review-mod--synthesis">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">⑤</span> 综合判断（跨维度）</h3>' +
-      '<ol class="review-conclusions">' +
-      '<li>此处为占位说明：静态 fish 页中 ⑤ 由脚本结合对标池分位、触达、结构等多句生成。若需相同文案与判断，请使用本地生成脚本输出 HTML。</li>' +
-      '</ol>' +
+      buildSynthesisModuleHtml(pa, pyes, est30) +
       '</section>' +
       '</div>' +
       '<details class="period-metrics-fold">' +
-      '<summary class="period-metrics-fold-sum">展开 / 收起 ⑥ 六格指标明细（字段与 fish 同源快照）</summary>' +
-      '<p class="review-grid-hint">以下为简版 <strong>⑥</strong>，指标来自监测表当前累计行；完整算式脚注以本地生成页为准。</p>' +
+      '<summary class="period-metrics-fold-sum">展开 / 收起 ⑥ 六格指标明细</summary>' +
+      '<p class="review-grid-hint">以下为 <strong>⑥</strong> 六格摘要，指标来自监测表「当前累计」快照行；预估为线性外推。</p>' +
       miniGrid +
       '</details>' +
       '</article>'
@@ -748,23 +796,21 @@
 
   function buildFishEmbedReportHtml(t) {
     const periods = t.periods || [];
-    const latest = periods[0];
-    if (!latest) {
+    if (!periods.length) {
       return '<p class="review-mod-note">该专题无汇总期次数据。</p>';
     }
-    const firstBoard = buildPeriodBoardArticle(latest);
+    const boards = periods.map((sumRow) => buildPeriodBoardArticle(sumRow)).join('');
     return (
       '<div class="wishReviewFishRoot fish-report-embedded">' +
       '<p class="sub" style="margin:0 0 16px;line-height:1.55">' +
       '专题 <strong>' +
       esc(t.name) +
-      '</strong> · <strong>版式与 fish-wish-review.html 一致</strong>。' +
-      ' 本页面仅展示<strong>最新一期</strong>。' +
-      ' <strong>顶栏「预估30日」为线性外推</strong>；多模型 MAPE 与⑤ 长结论、④ 分层、同品类分位等仍依赖本地：<code>生成_人鱼全期结论表.py --topic ' +
-      esc(t.name) +
-      "'</code>。</p>" +
+      '</strong> · 共 <strong>' +
+      esc(String(periods.length)) +
+      '</strong> 期复盘均在下方由监测 CSV 在浏览器内生成（无需本地 HTML）。' +
+      ' 顶栏「预估30日」为 <strong>线性外推</strong>；对标分位与分层明细等依赖额外 CSV 合并时方可扩展。</p>' +
       '<div class="fish-period-stack">' +
-      firstBoard +
+      boards +
       '</div>'
     );
   }
@@ -788,7 +834,6 @@
     }
 
     host.className = 'card__body wishReviewDetailInner--fish';
-    // Always generate the review fully on-page (no local HTML iframe).
     host.innerHTML = buildFishEmbedReportHtml(t);
   }
 
@@ -863,7 +908,7 @@
       return;
     }
     if (status) {
-      status.textContent = '正在解析整体数据监测（完整行解析，仅展示最新一期复盘）…';
+      status.textContent = '正在解析整体数据监测（完整行解析，生成全部期次复盘）…';
     }
     const mainBlock = await readFn();
     if (!mainBlock.ok) {
@@ -914,7 +959,7 @@
         layerRowCount: 0,
         workRowCount: 0,
         loadedAt: Date.now(),
-        note: '完整监测 CSV 解析；仅展示最新一期复盘卡（浏览器端不复现本地 Python 全量文案）。',
+        note: '完整监测 CSV 解析；专题内全部期次复盘由页面动态生成。',
       };
     }
     const built = buildTopicModels(state.rows);
@@ -933,7 +978,7 @@
           : `已加载 ${state.rows.length} 行`) +
         ` · ${built.topicCount} 个专题 · ${built.activityDedupCount} 个祈愿活动` +
         `（汇总·全部 原始 ${built.rawSummaryCount} 行，专题内按活动标识去重）` +
-        ' · 已完成完整监测 CSV 解析（性能取决于数据量）；对标池等仍未载入，全量请用本地脚本';
+        ' · 已完成监测 CSV 解析（性能取决于数据量）；对标池/分层/作品明细等未合并载入';
     }
     if (src) {
       const label =

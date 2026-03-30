@@ -43,113 +43,6 @@ async function resolveReviewRootFromBoundRoot(rootHandle) {
   return resolveFirstChildDir(rootHandle, REVIEW_ROOT_CANDIDATES);
 }
 
-// ─── Local "fish" full 5D HTML index (read via File System Access API) ───
-// Map: `${topic}||${periodNo}` -> { fileHandle, fileName, topic, periodNo }
-let fishHtmlIndex = null;
-
-function normTopicForFishKey(s) {
-  return String(s || '').trim();
-}
-
-function fishKey(topic, periodNo) {
-  return `${normTopicForFishKey(topic)}||${String(periodNo)}`;
-}
-
-function parseFishReportFromFileName(fileName) {
-  const name = String(fileName || '');
-  // Example: 人鱼陷落-第15期祈愿-五维复盘.html
-  let m = name.match(/^(.*?)-第(\d+)期.*五维复盘\.html$/i);
-  if (!m) {
-    // Example: 人鱼陷落 · 第15期祈愿-五维复盘.html
-    m = name.match(/^(.*?)[·\- ]+第(\d+)期.*五维复盘\.html$/i);
-  }
-  if (!m) return null;
-  const topic = String(m[1] || '').trim();
-  const periodNo = parseInt(String(m[2] || ''), 10);
-  if (!topic || !Number.isFinite(periodNo)) return null;
-  return { topic, periodNo };
-}
-
-async function scanFishHtmlHandlesRecursive(dirHandle, depth) {
-  const out = [];
-  if (!dirHandle || typeof dirHandle.values !== 'function') return out;
-  const nextDepth = typeof depth === 'number' ? depth : 3;
-
-  // eslint-disable-next-line no-restricted-syntax
-  for await (const entry of dirHandle.values()) {
-    if (!entry) continue;
-    if (entry.kind === 'file') {
-      const lower = String(entry.name || '').toLowerCase();
-      if (!lower.endsWith('.html')) continue;
-      if (!/五维复盘/i.test(entry.name)) continue;
-      const parsed = parseFishReportFromFileName(entry.name);
-      if (!parsed) continue;
-      out.push({
-        ...parsed,
-        fileHandle: entry,
-        fileName: entry.name,
-      });
-      continue;
-    }
-
-    if (entry.kind === 'directory' && nextDepth > 0) {
-      // eslint-disable-next-line no-await-in-loop
-      const sub = await scanFishHtmlHandlesRecursive(entry, nextDepth - 1);
-      out.push(...sub);
-    }
-  }
-
-  return out;
-}
-
-async function ensureFishHtmlIndex() {
-  if (fishHtmlIndex) return fishHtmlIndex;
-
-  const root = await getBoundDirHandle();
-  if (!root) {
-    fishHtmlIndex = new Map();
-    return fishHtmlIndex;
-  }
-
-  const perm = await root.queryPermission?.({ mode: 'read' });
-  if (perm !== 'granted') {
-    const req = await root.requestPermission?.({ mode: 'read' });
-    if (req !== 'granted') {
-      fishHtmlIndex = new Map();
-      return fishHtmlIndex;
-    }
-  }
-
-  const review = await resolveReviewRootFromBoundRoot(root);
-  if (!review) {
-    fishHtmlIndex = new Map();
-    return fishHtmlIndex;
-  }
-
-  const items = await scanFishHtmlHandlesRecursive(review.handle, 4);
-  const idx = new Map();
-  for (const it of items) {
-    idx.set(fishKey(it.topic, it.periodNo), it);
-  }
-  fishHtmlIndex = idx;
-  return fishHtmlIndex;
-}
-
-async function readFishReportHtml(topic, periodNo) {
-  const index = await ensureFishHtmlIndex();
-  const key = fishKey(topic, periodNo);
-  const it = index.get(key);
-  if (!it) {
-    return {
-      ok: false,
-      error: `未找到本地完整五维复盘 HTML：${String(topic)} 第${String(periodNo)}期（请检查文件名是否为 *-第N期*-五维复盘.html）。`,
-    };
-  }
-  const file = await it.fileHandle.getFile();
-  const html = await file.text();
-  return { ok: true, html, fileName: it.fileName, topic: it.topic, periodNo: it.periodNo };
-}
-
 async function scanMonitorCsvMetaFromBoundRoot() {
   const root = await getBoundDirHandle();
   if (!root) {
@@ -428,9 +321,6 @@ async function scanBundleFromRoot(rootHandle) {
 
 async function runScan() {
   try {
-    // Invalidate cache so newly generated fish HTML can be picked up.
-    fishHtmlIndex = null;
-
     const root = await getBoundDirHandle();
     if (!root) return;
     const scan = await scanBundleFromRoot(root);
@@ -622,7 +512,6 @@ async function readMonitorCsvFromBoundRoot() {
 /** 慎用：会一次性读入监测同夹+分层+作品明细全部 CSV，数据大时易 OOM；看板默认只用 wishReviewReadMonitorCsv */
 window.wishReviewReadFullBundle = readFullWishReviewBundleFromBoundRoot;
 window.wishReviewReadMonitorCsv = readMonitorCsvFromBoundRoot;
-window.wishReviewReadFishReportHtml = readFishReportHtml;
 window.wishReviewScanMonitorCsvMeta = scanMonitorCsvMetaFromBoundRoot;
 
 function onBindClick() {
