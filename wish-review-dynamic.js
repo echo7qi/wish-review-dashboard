@@ -46,11 +46,22 @@
   }
 
   /**
-   * 解析监测 CSV：
-   * - 为了展示“最新一期的完整复盘”，这里不再做看板用行的筛选瘦身；
-   * - 仍然会 normalize 行 key 并在后续逻辑中只使用所需的汇总/快照字段。
-   *
-   * 注意：数据量很大时浏览器内存/解析时间会显著上升。
+   * 大表瘦身：只保留专题列表与复盘用到的行，避免百万行明细把 Chrome 撑爆（错误代码 5 ≈ OOM）。
+   * - 汇总行：汇总 / 汇总 / 全部
+   * - 快照行：当前累计 + 数据周期「上线1日内」…「上线9日内」（与 snapRowN 一致）
+   */
+  function isDashboardUsefulRow(r) {
+    if (isSummaryAllRow(r)) return true;
+    if (val(r, '数据分类') !== '当前累计') return false;
+    const dp = String(val(r, '数据周期') || '').trim();
+    const m = dp.match(/^上线(\d+)日内$/);
+    if (!m) return false;
+    const n = parseInt(m[1], 10);
+    return n >= 1 && n <= 9;
+  }
+
+  /**
+   * 解析监测 CSV：逐行过滤后再入内存（见 isDashboardUsefulRow）。
    */
   function parseMonitoringCsvToAllRows(text, logLabel) {
     const acc = [];
@@ -69,6 +80,7 @@
         const raw = results.data;
         if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return;
         const row = normalizeRowKeys(raw);
+        if (!isDashboardUsefulRow(row)) return;
         acc.push(row);
       },
       complete(results) {
@@ -214,7 +226,7 @@
     fileName: '',
     selected: null,
     filter: '',
-    // This dashboard always renders only the latest period (no past expansion).
+    // 右侧详情默认只挂载最新一期 DOM；历史期次在 <details> 内首次展开时再生成。
     // Auto refresh: compare monitor CSV latest mtime to decide reload.
     lastMainMonitorLastModified: null,
   };
@@ -698,6 +710,12 @@
     return hit2 || '';
   }
 
+  function clearFunnelRowCache() {
+    if (buildUserReachFunnelsModuleHtml._cache) {
+      buildUserReachFunnelsModuleHtml._cache.clear();
+    }
+  }
+
   function buildUserReachFunnelsModuleHtml(sumRow) {
     const aid = val(sumRow, '活动标识');
     const daysRaw = toNum(val(sumRow, '已上线天数'));
@@ -799,18 +817,35 @@
     if (!periods.length) {
       return '<p class="review-mod-note">该专题无汇总期次数据。</p>';
     }
-    const boards = periods.map((sumRow) => buildPeriodBoardArticle(sumRow)).join('');
+    const latestBoard = buildPeriodBoardArticle(periods[0]);
+    let pastBlock = '';
+    if (periods.length > 1) {
+      const nPast = periods.length - 1;
+      pastBlock =
+        '<details class="wish-past-periods fish-past-periods-details">' +
+        '<summary class="wish-past-periods__sum">历史期次（' +
+        esc(String(nPast)) +
+        ' 期）— 点击展开加载，减轻内存与卡顿</summary>' +
+        '<div class="fish-period-stack wish-past-periods__host" data-topic="' +
+        esc(t.name) +
+        '"></div>' +
+        '</details>';
+    }
     return (
       '<div class="wishReviewFishRoot fish-report-embedded">' +
       '<p class="sub" style="margin:0 0 16px;line-height:1.55">' +
       '专题 <strong>' +
       esc(t.name) +
-      '</strong> · 共 <strong>' +
-      esc(String(periods.length)) +
-      '</strong> 期复盘均在下方由监测 CSV 在浏览器内生成（无需本地 HTML）。' +
-      ' 顶栏「预估30日」为 <strong>线性外推</strong>；对标分位与分层明细等依赖额外 CSV 合并时方可扩展。</p>' +
+      '</strong> · 监测 CSV 在浏览器内生成复盘（默认展示<strong>最新一期</strong>）' +
+      (periods.length > 1
+        ? '；另有 <strong>' + esc(String(periods.length - 1)) + '</strong> 期请在下方折叠区展开查看。'
+        : '。') +
+      ' 大表已自动<strong>仅保留汇总行与上线 1–9 日内快照</strong>以降低崩溃风险。' +
+      ' 顶栏「预估30日」为线性外推。</p>' +
       '<div class="fish-period-stack">' +
-      boards +
+      latestBoard +
+      '</div>' +
+      pastBlock +
       '</div>'
     );
   }
@@ -818,6 +853,7 @@
   function renderDetail(topicName) {
     const host = $('wishReviewDetailInner');
     if (!host) return;
+    clearFunnelRowCache();
 
     if (!topicName) {
       host.className = 'card__body';
@@ -908,7 +944,7 @@
       return;
     }
     if (status) {
-      status.textContent = '正在解析整体数据监测（完整行解析，生成全部期次复盘）…';
+      status.textContent = '正在解析整体数据监测（仅保留汇总与 1–9 日快照行，降低内存）…';
     }
     const mainBlock = await readFn();
     if (!mainBlock.ok) {
@@ -948,6 +984,7 @@
       if (status) status.textContent = 'CSV 解析失败';
       return;
     }
+    clearFunnelRowCache();
     state.rows = dedupeMonitoringRows(mergedRows);
     state.benchRows = [];
     state.layerRows = [];
@@ -959,7 +996,7 @@
         layerRowCount: 0,
         workRowCount: 0,
         loadedAt: Date.now(),
-        note: '完整监测 CSV 解析；专题内全部期次复盘由页面动态生成。',
+        note: '监测 CSV 已过滤为汇总+快照行；详情默认最新一期，历史期次展开后生成。',
       };
     }
     const built = buildTopicModels(state.rows);
@@ -978,7 +1015,7 @@
           : `已加载 ${state.rows.length} 行`) +
         ` · ${built.topicCount} 个专题 · ${built.activityDedupCount} 个祈愿活动` +
         `（汇总·全部 原始 ${built.rawSummaryCount} 行，专题内按活动标识去重）` +
-        ' · 已完成监测 CSV 解析（性能取决于数据量）；对标池/分层/作品明细等未合并载入';
+        ' · 已过滤无关明细行；右侧默认最新一期复盘；对标池/分层/作品明细等未合并载入';
     }
     if (src) {
       const label =
@@ -1023,6 +1060,27 @@
     });
 
     document.addEventListener('wishreview:datasource-updated', () => loadFromBinding());
+
+    const mainScroll = document.querySelector('.reviewEmbedMain--dynamic');
+    if (mainScroll) {
+      mainScroll.addEventListener('toggle', (ev) => {
+        const det = ev.target;
+        if (!det || !det.classList || !det.classList.contains('wish-past-periods')) return;
+        if (!det.open) return;
+        const host = det.querySelector('.wish-past-periods__host');
+        if (!host || host.dataset.filled === '1') return;
+        const topicName = host.getAttribute('data-topic');
+        const topic = state.topics.find((x) => x.name === topicName);
+        if (!topic || !topic.periods || topic.periods.length < 2) {
+          host.innerHTML = '<p class="review-mod-note">无更多期次数据。</p>';
+          host.dataset.filled = '1';
+          return;
+        }
+        const past = topic.periods.slice(1);
+        host.innerHTML = past.map((sumRow) => buildPeriodBoardArticle(sumRow)).join('');
+        host.dataset.filled = '1';
+      });
+    }
 
     loadFromBinding();
   }

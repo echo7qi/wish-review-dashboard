@@ -317,6 +317,25 @@ body[data-page="wish-review"] .wishReviewDash__col--list .wishReviewDash__badge{
   padding: 1px 5px;
 }
 
+/* 历史期次延迟渲染：折叠标题 */
+.wish-past-periods.fish-past-periods-details{
+  margin-top: 16px;
+  border: 1px solid rgba(79, 124, 255, 0.25);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: rgba(79, 124, 255, 0.04);
+}
+.wish-past-periods__sum{
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: rgba(49, 95, 230, 0.95);
+  user-select: none;
+}
+.wish-past-periods__host{
+  margin-top: 12px;
+}
+
 .wishReviewDash__detail{
   overflow: visible;
   min-width: 0;
