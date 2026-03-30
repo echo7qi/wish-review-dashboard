@@ -1036,7 +1036,7 @@
     return { est, progressPct };
   }
 
-  function oneLinerText(pa, nSnap, catPr) {
+  function oneLinerText(pa, nSnap) {
     if (!pa) {
       return (
         '未匹配到「当前累计·上线' +
@@ -1057,9 +1057,6 @@
       );
     }
     if (t != null) bits.push('目标触达率约 ' + (t * 100).toFixed(1) + '%');
-    if (catPr != null) {
-      bits.push('同期累计收入约超同品类 ' + catPr.toFixed(0) + '% 样本。');
-    }
     if (!bits.length) return '—';
     return bits.join('；') + '。';
   }
@@ -1355,7 +1352,7 @@
       `<span class="period-sub">${esc(genre)} · 已上线 ${esc(daysOnline)} 天 · 表内对比 ${esc(String(n))} 日</span>` +
       '</div>' +
       '<p class="period-one-liner"><span class="one-liner-label">一句话总结</span>' +
-      oneLinerText(pa, n, catPr) +
+      oneLinerText(pa, n) +
       '</p>' +
       kpiBlock +
       '</header>' +
