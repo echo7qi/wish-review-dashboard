@@ -650,10 +650,26 @@
     .rv-funnelCard__title {
       font-size: 0.9rem;
       font-weight: 800;
-      color: #0f172a;
       margin: 0 0 12px;
       padding-bottom: 8px;
       border-bottom: 1px solid #f1f5f9;
+    }
+    /* 顺序固定：全部用户 → 目标阅读 → 目标IP付费 → 非目标阅读 */
+    .rv-funnel-grid > .rv-funnelCard:nth-child(1) .rv-funnelCard__title {
+      color: #4338ca;
+      border-bottom-color: #e0e7ff;
+    }
+    .rv-funnel-grid > .rv-funnelCard:nth-child(2) .rv-funnelCard__title {
+      color: #0f766e;
+      border-bottom-color: #ccfbf1;
+    }
+    .rv-funnel-grid > .rv-funnelCard:nth-child(3) .rv-funnelCard__title {
+      color: #6d28d9;
+      border-bottom-color: #ede9fe;
+    }
+    .rv-funnel-grid > .rv-funnelCard:nth-child(4) .rv-funnelCard__title {
+      color: #c2410c;
+      border-bottom-color: #ffedd5;
     }
     .rv-funnel {
       display: flex;
