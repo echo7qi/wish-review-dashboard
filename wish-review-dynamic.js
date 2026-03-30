@@ -534,7 +534,8 @@
       kpiBlock +
       '</header>' +
       '<div class="review-modules">' +
-      '<p class="review-mod-note">阅读顺序：①②③④⑤；⑥ 为下方折叠区。版式对齐 fish-wish-review.html。</p>' +
+      '<p class="review-mod-note">阅读顺序：模块1（用户触达）→①②③④⑤；⑥ 为下方折叠区。版式对齐 fish-wish-review.html。</p>' +
+      buildUserReachFunnelsModuleHtml(sumRow) +
       '<div class="review-mod-grid">' +
       '<section class="review-mod">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">①</span> 付费表现</h3>' +
@@ -569,6 +570,144 @@
       miniGrid +
       '</details>' +
       '</article>'
+    );
+  }
+
+  function valFuzzy(r, keys) {
+    for (let i = 0; i < keys.length; i++) {
+      const v = val(r, keys[i]);
+      if (v != null && v !== '') return v;
+    }
+    return '';
+  }
+
+  function buildFunnelSegmentHtml(label, value, max, colors) {
+    const vNum = value == null ? 0 : Math.max(0, value);
+    const missing = value == null || vNum <= 0 || !Number.isFinite(vNum);
+    const w = max > 0 ? (vNum / max) * 100 : 0;
+    const wShown = missing ? 10 : Math.max(10, w);
+    const color = missing ? '#e5e7eb' : colors;
+    const valText = value == null || !Number.isFinite(vNum) ? '—' : fmtInt(vNum);
+    return (
+      `<div class="rv-funnelSegWrap" style="width:${wShown.toFixed(1)}%">` +
+      `<div class="rv-funnelSeg" style="background:${esc(color)}">` +
+      `<div class="rv-funnelSeg__val">${esc(valText)}</div>` +
+      `<div class="rv-funnelSeg__lab">${esc(label)}</div>` +
+      `</div></div>`
+    );
+  }
+
+  function resolveIsTargetUserCategoryValue(isTargetUserValues, categoryLabel) {
+    const normalized = String(categoryLabel || '').trim();
+    const candidates = [];
+    if (normalized.includes('全部')) candidates.push('全部', '全部用户');
+    if (normalized.includes('目标阅读')) candidates.push('目标阅读用户', '目标阅读', '阅读用户', '阅读');
+    if (normalized.includes('目标IP付费')) candidates.push('目标IP付费用户', 'IP付费用户', 'IP付费', '付费IP');
+    if (normalized.includes('非目标阅读')) candidates.push('非目标阅读用户', '非目标阅读', '非阅读用户', '非阅读');
+
+    // 1) exact
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      const exact = isTargetUserValues.find((v) => String(v).trim() === c);
+      if (exact) return exact;
+    }
+    // 2) substring heuristics
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      const hit = isTargetUserValues.find((v) => String(v).includes(c));
+      if (hit) return hit;
+    }
+    // 3) broad by keywords
+    const keywords = [];
+    if (normalized.includes('全部')) keywords.push('全部');
+    if (normalized.includes('阅读')) keywords.push('阅读');
+    if (normalized.includes('IP')) keywords.push('IP');
+    if (normalized.includes('付费')) keywords.push('付费');
+    if (normalized.includes('非')) keywords.push('非');
+    const hit2 = isTargetUserValues.find((v) => keywords.every((k) => String(v).includes(k)) && keywords.length);
+    return hit2 || '';
+  }
+
+  function buildUserReachFunnelsModuleHtml(sumRow) {
+    const aid = val(sumRow, '活动标识');
+    const daysRaw = toNum(val(sumRow, '已上线天数'));
+    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 9;
+    const snap = snapRowN(state.rows, aid, daysInt);
+    const n = snap.n;
+    const periodKey = `上线${n}日内`;
+
+    // Cache snapshot rows by (aid|periodKey)
+    if (!buildUserReachFunnelsModuleHtml._cache) buildUserReachFunnelsModuleHtml._cache = new Map();
+    const cKey = `${aid}||${periodKey}`;
+    let snapRows = buildUserReachFunnelsModuleHtml._cache.get(cKey);
+    if (!snapRows) {
+      snapRows = [];
+      for (let i = 0; i < state.rows.length; i++) {
+        const r = state.rows[i];
+        if (val(r, '活动标识') !== aid) continue;
+        if (val(r, '数据分类') !== '当前累计') continue;
+        if (val(r, '数据周期') !== periodKey) continue;
+        snapRows.push(r);
+      }
+      buildUserReachFunnelsModuleHtml._cache.set(cKey, snapRows);
+    }
+
+    const isTargetValues = Array.from(
+      new Set(snapRows.map((r) => val(r, '是否目标用户')).filter(Boolean)),
+    );
+
+    const pickRowByCategory = (categoryLabel) => {
+      const resolved = resolveIsTargetUserCategoryValue(isTargetValues, categoryLabel);
+      if (!resolved) return null;
+      for (let i = 0; i < snapRows.length; i++) {
+        if (val(snapRows[i], '是否目标用户') === resolved) return snapRows[i];
+      }
+      return null;
+    };
+
+    const targets = [
+      { label: '全部用户', colors: '#4f46e5' },
+      { label: '目标阅读用户', colors: '#0ea5e9' },
+      { label: '目标IP付费用户', colors: '#f59e0b' },
+      { label: '非目标阅读用户', colors: '#16a34a' },
+    ];
+
+    function stepValuesFromRow(row) {
+      if (!row) return { target: null, reach: null, draw: null, pay: null };
+      const target = toNum(valFuzzy(row, ['目标用户数', '目标用户']));
+      const reach = toNum(valFuzzy(row, ['触达用户数', '触达UV']));
+      const draw = toNum(valFuzzy(row, ['抽卡用户数', '抽卡用户']));
+      const pay = toNum(valFuzzy(row, ['付费抽卡用户数', '付费抽卡用户']));
+      return { target, reach, draw, pay };
+    }
+
+    const funnelCardsHtml = targets
+      .map((t) => {
+        const row = pickRowByCategory(t.label);
+        const v = stepValuesFromRow(row);
+        const max = Math.max(v.target || 0, v.reach || 0, v.draw || 0, v.pay || 0);
+        return (
+          `<div class="rv-funnelCard">` +
+          `<div class="rv-funnelCard__title">${esc(t.label)}</div>` +
+          `<div class="rv-funnel">` +
+          buildFunnelSegmentHtml('目标用户数', v.target, max, '#4f46e5') +
+          buildFunnelSegmentHtml('触达用户数', v.reach, max, '#0ea5e9') +
+          buildFunnelSegmentHtml('抽卡用户数', v.draw, max, '#f59e0b') +
+          buildFunnelSegmentHtml('付费抽卡用户数', v.pay, max, '#16a34a') +
+          `</div>` +
+          `</div>`
+        );
+      })
+      .join('\n');
+
+    return (
+      `<section class="review-mod rv-funnelModule">` +
+      `<h3 class="review-mod-title"><span class="review-mod-badge">1</span>用户触达</h3>` +
+      `<div class="rv-funnel-grid">${funnelCardsHtml}</div>` +
+      `<p class="review-mod-note">四个漏斗分别基于监测表「是否目标用户」列筛选：${esc(
+        targets.map((x) => x.label).join(' / '),
+      )}。</p>` +
+      `</section>`
     );
   }
 

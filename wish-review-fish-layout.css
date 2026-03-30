@@ -570,6 +570,63 @@
       grid-template-columns: repeat(3, 1fr);
       gap: 10px;
     }
+
+    /* User reach funnels (module 1) */
+    .rv-funnelModule {
+      margin-top: 0;
+      margin-bottom: 12px;
+    }
+    .rv-funnel-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 900px) {
+      .rv-funnel-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .rv-funnelCard {
+      background: #f8fafc;
+      border: 1px solid #e0e7ff;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .rv-funnelCard__title {
+      font-size: 0.78rem;
+      font-weight: 800;
+      color: #0f172a;
+      margin-bottom: 8px;
+    }
+    .rv-funnelSegWrap {
+      height: 28px;
+      margin: 0 auto 6px 0;
+    }
+    .rv-funnelSegWrap:last-child { margin-bottom: 0; }
+    .rv-funnelSeg {
+      height: 28px;
+      border-radius: 9px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(15, 23, 42, 0.06);
+      font-size: 0.72rem;
+      line-height: 1.1;
+      padding: 0 8px;
+    }
+    .rv-funnelSeg__val {
+      font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace);
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .rv-funnelSeg__lab {
+      font-weight: 700;
+      color: rgba(15, 23, 42, 0.65);
+      margin-top: 2px;
+      text-align: center;
+      white-space: nowrap;
+    }
     @media (max-width: 900px) {
       .review-mod-grid { grid-template-columns: 1fr; }
     }
