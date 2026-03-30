@@ -4,26 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>祈愿单项目复盘看板（独立站点）</title>
-    <link rel="stylesheet" href="./styles.css?v=20260330" />
-    <link rel="stylesheet" href="./wish-review-fish-layout.css?v=20260330" />
+    <link rel="stylesheet" href="./styles.css?v=20260430" />
+    <link rel="stylesheet" href="./wish-review-fish-layout.css?v=20260430" />
   </head>
   <body data-page="wish-review">
     <div class="appShell">
-      <aside class="sidebar">
-        <div class="sidebar__brand">祈愿复盘看板</div>
-        <div class="wishReviewSidebarTools">
-          <div class="wishReviewSidebarTools__title">数据绑定</div>
-          <button type="button" class="btn js-wish-review-bind">绑定数据文件夹</button>
-          <button type="button" class="btn btn--ghost js-wish-review-scan">扫描数据源</button>
-        </div>
-        <div class="wishReviewSidebarTools wishReviewSidebarTools--tight">
-          <p class="sidebar__hint sidebar__hint--tight muted" style="margin-top: 8px">
-            数据在浏览器本地解析，不上传。
-          </p>
-        </div>
-      </aside>
-
       <div class="appShell__content appShell__content--wishReview">
+        <div class="wishReviewTopbar" aria-label="数据与品牌">
+          <div class="wishReviewTopbar__brand">祈愿复盘看板</div>
+          <div class="wishReviewTopbar__bind">
+            <span class="wishReviewTopbar__bindLabel">数据绑定</span>
+            <button type="button" class="btn js-wish-review-bind">绑定数据文件夹</button>
+            <button type="button" class="btn btn--ghost js-wish-review-scan">扫描数据源</button>
+          </div>
+          <p class="wishReviewTopbar__hint muted">数据在浏览器本地解析，不上传。</p>
+        </div>
+
         <header class="header">
           <div class="header__title">
             <h1>祈愿单项目复盘</h1>
@@ -78,8 +74,8 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-    <script src="./wish-review.js"></script>
-    <script src="./wish-review-dynamic.js"></script>
+    <script src="./wish-review.js?v=20260430"></script>
+    <script src="./wish-review-dynamic.js?v=20260430"></script>
   </body>
 </html>
 

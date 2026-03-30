@@ -1,7 +1,7 @@
-/* 祈愿单项目复盘：与运营宣推 / 触达共用「资源位数据更新」根目录绑定；对标池 CSV 与「整体数据监测」同夹。
- * 各子夹内多个 CSV 按修改时间从旧到新合并（监测夹排除池类文件名）。扫描写入 window.__WISH_REVIEW_BUNDLE_SCAN__。 */
+/* 祈愿单项目复盘（独立站点 wish-review-dashboard）：目录绑定单独存 IndexedDB，避免与 echo7qi.github.io/cursor-demo
+ * 等同源下的「运营宣推」看板共用 ops-dashboard-local-db 导致互相覆盖。各子夹内多个 CSV 按修改时间从旧到新合并。 */
 
-const DB_NAME = 'ops-dashboard-local-db';
+const DB_NAME = 'wish-review-dashboard-local-db';
 const DB_STORE = 'kv';
 const DB_KEY_DIR_HANDLE = 'boundDirHandle';
 

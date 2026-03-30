@@ -1,0 +1,22 @@
+---
+description: wish-review-dashboard 修改后必须推送以触发线上发布
+globs: "**/*"
+alwaysApply: true
+---
+
+# wish-review-dashboard：修改即部署
+
+本仓库已配置 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)：推送到 `main` 后由 GitHub Actions 发布到 Pages。
+
+**只要你改动了本仓库里任何会出现在线上的文件**（含 `*.html` / `*.js` / `*.css` / `deploy.sh` / `.github/**` 等），在结束任务前**必须**从仓库根目录执行：
+
+```bash
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+./deploy.sh "简要中文说明本次修改"
+```
+
+`deploy.sh` 会 `git add -A`、`commit`、`push`；**不要**等用户再说「部署一下」才执行。
+
+若仅有无实质输出变更（例如仅改本规则文件）且用户明确只要本地保存，可跳过部署。
+
+线上地址：https://echo7qi.github.io/wish-review-dashboard/
