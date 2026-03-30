@@ -646,14 +646,11 @@
   function renderDetail(topicName) {
     const host = $('wishReviewDetailInner');
     if (!host) return;
-    // Render can be triggered frequently (initial load + auto refresh + quick clicks).
-    // Use a request sequence to avoid race: only the latest request wins.
-    if (!renderDetail._seq) renderDetail._seq = 0;
-    const seq = ++renderDetail._seq;
 
     if (!topicName) {
       host.className = 'card__body';
-      host.innerHTML = '<p class="muted wishReviewDash__empty">绑定后在左侧选择专题；右侧展示该专题最新期的完整五维复盘。</p>';
+      host.innerHTML =
+        '<p class="muted wishReviewDash__empty">绑定后在左侧选择专题；右侧将按监测 CSV 在线计算并生成复盘内容。</p>';
       return;
     }
 
@@ -665,56 +662,8 @@
     }
 
     host.className = 'card__body wishReviewDetailInner--fish';
-
-    const latest = (t.periods && t.periods.length ? t.periods[0] : null) || null;
-    const latestPeriodNo = latest ? periodNum(latest) : null;
-
-    const placeholderHtml = `
-      <div style="padding:12px 0">
-        <p class="muted wishReviewDash__empty" style="margin:0 0 8px">正在读取本地完整五维复盘 HTML…</p>
-        ${latestPeriodNo != null ? `<p class="muted" style="margin:0;font-size:12px">专题：${esc(t.name)} · 第${esc(String(latestPeriodNo))}期</p>` : ''}
-      </div>
-      <div style="border-top:1px solid rgba(15,23,42,.08); margin:12px 0; padding-top:12px">
-        <iframe id="wishReviewFullFishFrame" style="width:100%;height:72vh;border:0;border-radius:12px;background:#fff;display:none"></iframe>
-      </div>
-    `;
-    host.innerHTML = placeholderHtml;
-
-    const iframe = host.querySelector('#wishReviewFullFishFrame');
-    const statusEl = host.querySelector('.wishReviewDash__empty');
-
-    const readFn = window.wishReviewReadFishReportHtml;
-    if (typeof readFn !== 'function') {
-      if (seq !== renderDetail._seq) return;
-      if (iframe) iframe.style.display = 'none';
-      host.innerHTML = '<p class="muted wishReviewDash__empty">缺少读取本地五维复盘 HTML 的脚本。</p>';
-      return;
-    }
-
-    if (!latestPeriodNo && latestPeriodNo !== 0) {
-      if (seq !== renderDetail._seq) return;
-      host.innerHTML = '<p class="muted wishReviewDash__empty">未识别到该专题的最新期次编号（第X期）。</p>';
-      return;
-    }
-
-    (async () => {
-      try {
-        const res = await readFn(t.name, latestPeriodNo);
-        if (seq !== renderDetail._seq) return;
-        if (!res || !res.ok) {
-          host.innerHTML = `<p class="muted wishReviewDash__empty">${esc(res?.error || '读取失败')}</p>`;
-          return;
-        }
-        if (iframe) {
-          iframe.srcdoc = res.html || '';
-          iframe.style.display = 'block';
-        }
-        if (statusEl) statusEl.textContent = res.fileName ? `来源文件：${res.fileName}` : '读取完成。';
-      } catch (e) {
-        if (seq !== renderDetail._seq) return;
-        host.innerHTML = `<p class="muted wishReviewDash__empty">读取失败：${esc(String(e?.message || e))}</p>`;
-      }
-    })();
+    // Always generate the review fully on-page (no local HTML iframe).
+    host.innerHTML = buildFishEmbedReportHtml(t);
   }
 
   function topicMatchesFilter(t, q) {
