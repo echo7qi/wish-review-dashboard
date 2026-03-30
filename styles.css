@@ -90,7 +90,7 @@ body[data-page="wish-review"] .wishReviewTopbar{
 }
 body[data-page="wish-review"] .wishReviewTopbar__brand{
   font-weight: 700;
-  font-size: 13px;
+  font-size: 15px;
   letter-spacing: 0.3px;
   padding: 8px 12px;
   border-radius: 10px;
@@ -107,7 +107,7 @@ body[data-page="wish-review"] .wishReviewTopbar__bind{
   min-width: 0;
 }
 body[data-page="wish-review"] .wishReviewTopbar__bindLabel{
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--muted);
@@ -115,18 +115,18 @@ body[data-page="wish-review"] .wishReviewTopbar__bindLabel{
 }
 body[data-page="wish-review"] .wishReviewTopbar__bind .btn{
   width: auto;
-  min-height: 38px;
+  min-height: 40px;
   padding-left: 14px;
   padding-right: 14px;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
 }
 body[data-page="wish-review"] .wishReviewTopbar__hint{
   margin: 0;
   flex: 1 1 220px;
   max-width: 100%;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.45;
   padding: 8px 12px;
   border-radius: 10px;
@@ -142,6 +142,12 @@ body[data-page="wish-review"] .appShell__content--wishReview{
 }
 body[data-page="wish-review"] .header{
   flex-shrink: 0;
+}
+body[data-page="wish-review"] .header h1{
+  font-size: 1.25rem;
+}
+body[data-page="wish-review"] .header__subtitle{
+  font-size: 0.9375rem;
 }
 body[data-page="wish-review"] .reviewEmbedMain{
   flex: 1;
@@ -172,6 +178,11 @@ body[data-page="wish-review"] .reviewEmbed{
   }
 }
 
+/* 祈愿复盘页：根字号略增（fish 嵌入区大量用 rem）；顶栏/列表等仍用 px 的见下 */
+html:has(body[data-page="wish-review"]) {
+  font-size: 112.5%;
+}
+
 /* 祈愿复盘 · 动态看板 */
 .wishReviewDash{
   display: flex;
@@ -194,7 +205,7 @@ body[data-page="wish-review"] .reviewEmbed{
   border: 1px solid var(--border);
   border-radius: 10px;
   font: inherit;
-  font-size: 14px;
+  font-size: 16px;
   background: rgba(255, 255, 255, 0.95);
 }
 .wishReviewDash__search:focus{
@@ -203,17 +214,18 @@ body[data-page="wish-review"] .reviewEmbed{
   border-color: rgba(79, 124, 255, 0.35);
 }
 .wishReviewDash__status{
-  font-size: 13px;
+  font-size: 15px;
 }
 .wishReviewDash__source{
-  font-size: 12px;
+  font-size: 14px;
   width: 100%;
   flex-basis: 100%;
 }
 .wishReviewDash__grid{
   display: grid;
-  grid-template-columns: minmax(260px, 340px) 1fr;
-  gap: 16px;
+  /* 左侧专题列表收窄，右侧详情区占满剩余宽度 */
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  gap: 14px;
   align-items: start;
 }
 @media (max-width: 960px){
@@ -225,7 +237,7 @@ body[data-page="wish-review"] .reviewEmbed{
   margin-bottom: 18px;
 }
 .wishReviewDash__h{
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   margin: 0 0 8px;
   color: rgba(15, 23, 42, 0.88);
@@ -258,18 +270,18 @@ body[data-page="wish-review"] .reviewEmbed{
 .wishReviewDash__topicName{
   display: block;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 15px;
 }
 .wishReviewDash__topicSub{
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   margin-top: 2px;
 }
 .wishReviewDash__badge{
   display: inline-block;
   margin-left: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   padding: 2px 6px;
   border-radius: 6px;
@@ -299,11 +311,11 @@ body[data-page="wish-review"] .reviewEmbed{
 }
 .wishReviewDash__detailTitle{
   margin: 0 0 6px;
-  font-size: 16px;
+  font-size: 18px;
 }
 .wishReviewDash__detailMeta{
   margin: 0 0 14px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .wishReviewDash__kpis{
   display: grid;
@@ -319,20 +331,20 @@ body[data-page="wish-review"] .reviewEmbed{
 }
 .wishReviewDash__kpiL{
   display: block;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   margin-bottom: 4px;
 }
 .wishReviewDash__kpi strong{
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
 }
 .wishReviewDash__subTitle{
-  font-size: 13px;
+  font-size: 15px;
   margin: 16px 0 8px;
 }
 .wishReviewDash__footNote{
-  font-size: 12px;
+  font-size: 14px;
   margin-top: 14px;
   line-height: 1.55;
 }
