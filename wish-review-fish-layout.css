@@ -480,8 +480,16 @@
       margin-top: 3px;
       font-size: 0.62rem;
       font-weight: 600;
-      color: #64748b;
       line-height: 1.25;
+    }
+    .kpi-pill .kpi-yoy--up {
+      color: #dc2626;
+    }
+    .kpi-pill .kpi-yoy--down {
+      color: #16a34a;
+    }
+    .kpi-pill .kpi-yoy--flat {
+      color: #64748b;
     }
     .kpi-pill .kpi-level {
       font-weight: 600;

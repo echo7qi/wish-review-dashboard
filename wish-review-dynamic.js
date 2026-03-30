@@ -1204,7 +1204,10 @@
     const pct = ((currVal - prevVal) / prevVal) * 100;
     const rounded = Math.round(pct);
     const sign = rounded > 0 ? '+' : '';
-    return '<span class="kpi-yoy">（上一期' + sign + rounded + '%）</span>';
+    let yoyMod = ' kpi-yoy--flat';
+    if (rounded > 0) yoyMod = ' kpi-yoy--up';
+    else if (rounded < 0) yoyMod = ' kpi-yoy--down';
+    return '<span class="kpi-yoy' + yoyMod + '">（上一期' + sign + rounded + '%）</span>';
   }
 
   function buildPeriodBoardArticle(sumRow) {
