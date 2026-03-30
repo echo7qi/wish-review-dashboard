@@ -191,6 +191,24 @@
     return Array.from(m.values());
   }
 
+  function dedupeTargetSplitRows(rows) {
+    const m = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const typeKey = String(
+        valFuzzy(r, ['目标用户类型', '用户类型', '人群类型', '是否目标用户']) || '',
+      ).trim();
+      const k = [
+        val(r, '活动标识'),
+        val(r, '专题名称'),
+        String(val(r, '第x次祈愿') || '').trim(),
+        typeKey,
+      ].join('\x01');
+      m.set(k, r);
+    }
+    return Array.from(m.values());
+  }
+
   const LAYER_ORDER = [
     '[200+)',
     '[100-200)',
@@ -928,6 +946,7 @@
     modelPackByGenre: new Map(),
     layerRows: [],
     layerIndex: new Map(),
+    splitRows: [],
     workRows: [],
     topics: [],
     fileName: '',
@@ -1210,6 +1229,213 @@
     return '<span class="kpi-yoy' + yoyMod + '">（上一期' + sign + rounded + '%）</span>';
   }
 
+  /** 顶栏环比同款配色，行内用于宣发文案 */
+  function yoyPercentInlineHtml(prevVal, currVal) {
+    if (prevVal == null || currVal == null) return '';
+    if (!Number.isFinite(prevVal) || !Number.isFinite(currVal)) return '';
+    if (prevVal === 0) return '';
+    const pct = ((currVal - prevVal) / prevVal) * 100;
+    const rounded = Math.round(pct);
+    const sign = rounded > 0 ? '+' : '';
+    let mod = ' promo-yoy--flat';
+    if (rounded > 0) mod = ' promo-yoy--up';
+    else if (rounded < 0) mod = ' promo-yoy--down';
+    return '<span class="promo-yoy' + mod + '">（上一期' + sign + rounded + '%）</span>';
+  }
+
+  /** 监测表「当前累计·全部」行：累计曝光用户数、UCTR（列名模糊或点击/曝光推导） */
+  function extractPromoCumulativeFromPa(pa) {
+    if (!pa) return { imp: null, uctr: null };
+    const imp = toNum(
+      valFuzzy(pa, [
+        '累计曝光用户数',
+        '资源累计曝光用户数',
+        '累计资源曝光uv',
+        '上线至今累计曝光用户数',
+        '宣发累计曝光用户数',
+        '全局累计曝光uv',
+        '资源曝光用户数',
+        '资源曝光uv累计',
+      ]),
+    );
+    let uctr = rate01(
+      valFuzzy(pa, [
+        '曝光UCTR',
+        'UCTR',
+        'U-CTR',
+        'Uctr',
+        '曝光转化率',
+        '资源曝光UCTR',
+      ]),
+    );
+    if (uctr == null) {
+      const clk = toNum(
+        valFuzzy(pa, ['全局点击uv', '累计点击用户数', '资源累计点击uv', '累计点击uv']),
+      );
+      const im2 =
+        imp != null && imp > 0
+          ? imp
+          : toNum(valFuzzy(pa, ['全局曝光uv', '累计曝光uv', '资源曝光uv累计']));
+      if (clk != null && im2 != null && im2 > 0) uctr = clk / im2;
+    }
+    return { imp, uctr };
+  }
+
+  function filterTargetSplitChartRows(rows, aid, topicName, pNo) {
+    const pStr = String(pNo).trim();
+    const out = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (aid && val(r, '活动标识') && val(r, '活动标识') !== aid) continue;
+      if (topicName && val(r, '专题名称') && val(r, '专题名称') !== topicName) continue;
+      const pCol = String(val(r, '第x次祈愿') || '').trim();
+      if (pCol && pStr && pCol !== pStr) continue;
+      out.push(r);
+    }
+    if (out.length) return out;
+    const loose = [];
+    for (let j = 0; j < rows.length; j++) {
+      const r = rows[j];
+      if (!aid || !val(r, '活动标识') || val(r, '活动标识') === aid) loose.push(r);
+    }
+    return loose;
+  }
+
+  function buildTargetUserSplitChartBlockHtml(filteredRows) {
+    if (!filteredRows.length) {
+      return (
+        '<p class="review-mod-note">未匹配到行：请在复盘根目录下提供文件夹<strong>「目标用户拆分」</strong>，CSV 含列「目标用户类型」「触达率」「累计收入不含赠」，并与本期<strong>活动标识</strong>或<strong>专题名称</strong>、<strong>期次</strong>一致。</p>'
+      );
+    }
+    const parsed = [];
+    for (let i = 0; i < filteredRows.length; i++) {
+      const r = filteredRows[i];
+      const label = String(
+        valFuzzy(r, ['目标用户类型', '用户类型', '人群类型']) || '—',
+      ).trim();
+      const reach = rate01(valFuzzy(r, ['触达率', '目标触达率', '目标用户触达率']));
+      const rev = toNum(
+        valFuzzy(r, [
+          '累计收入不含赠',
+          '累计付费收入不含赠',
+          '收入不含赠',
+          '祈愿累计收入不含赠',
+          '付费收入不含赠',
+        ]),
+      );
+      if (label === '—' && reach == null && rev == null) continue;
+      parsed.push({ label: label || '—', reach, rev });
+    }
+    if (!parsed.length) {
+      return (
+        '<p class="review-mod-note">「目标用户拆分」中无有效行（需「目标用户类型」「触达率」「累计收入不含赠」等列）。</p>'
+      );
+    }
+    let maxRev = 0;
+    for (let j = 0; j < parsed.length; j++) {
+      if (parsed[j].rev != null && parsed[j].rev > maxRev) maxRev = parsed[j].rev;
+    }
+    const rowsHtml = parsed
+      .map((x) => {
+        const rw =
+          x.reach != null && Number.isFinite(x.reach) ? Math.min(100, Math.max(0, x.reach * 100)) : 0;
+        const rv =
+          x.rev != null && Number.isFinite(x.rev) && maxRev > 0
+            ? Math.min(100, Math.max(0, (x.rev / maxRev) * 100))
+            : 0;
+        return (
+          '<tr>' +
+          '<td class="promo-split-td-type">' +
+          esc(x.label) +
+          '</td>' +
+          '<td class="promo-split-td-bar"><div class="promo-split-barCell"><div class="promo-split-barTrack" title="' +
+          esc(x.reach != null ? fmtPct(x.reach) : '—') +
+          '"><div class="promo-split-barFill promo-split-barFill--reach" style="width:' +
+          rw.toFixed(1) +
+          '%"></div></div><span class="promo-split-barLab">' +
+          esc(x.reach != null ? fmtPct(x.reach) : '—') +
+          '</span></div></td>' +
+          '<td class="promo-split-td-bar"><div class="promo-split-barCell"><div class="promo-split-barTrack" title="' +
+          esc(x.rev != null ? fmtInt(x.rev) : '—') +
+          '"><div class="promo-split-barFill promo-split-barFill--rev" style="width:' +
+          rv.toFixed(1) +
+          '%"></div></div><span class="promo-split-barLab">' +
+          esc(x.rev != null ? fmtInt(x.rev) : '—') +
+          '</span></div></td>' +
+          '</tr>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="promo-split-table-scroll">' +
+      '<table class="promo-split-table">' +
+      '<thead><tr><th>目标用户类型</th><th>触达率</th><th>累计收入不含赠</th></tr></thead>' +
+      '<tbody>' +
+      rowsHtml +
+      '</tbody></table></div>'
+    );
+  }
+
+  function buildPromoReachSectionHtml(sumRow, n, pa, launchRowsHtml) {
+    const pNo = periodNum(sumRow);
+    const aid = val(sumRow, '活动标识');
+    const topicName = val(sumRow, '专题名称') || '';
+    const prevSum = findPrevPeriodSummaryRow(sumRow);
+    let prevPa = null;
+    if (prevSum) {
+      const dPrev = Math.floor(toNum(val(prevSum, '已上线天数')) || 1);
+      prevPa = snapRowN(state.rows, val(prevSum, '活动标识'), dPrev).pa;
+    }
+    const curM = extractPromoCumulativeFromPa(pa);
+    const prevM = extractPromoCumulativeFromPa(prevPa);
+    const yImp = prevSum ? yoyPercentInlineHtml(prevM.imp, curM.imp) : '';
+    const yU = prevSum ? yoyPercentInlineHtml(prevM.uctr, curM.uctr) : '';
+
+    const summaryLines = [];
+    summaryLines.push(
+      '<p class="promo-reach-summary__p"><span class="promo-reach-summary__tag">口径</span>监测表<strong>当前累计</strong>、<strong>上线 ' +
+        esc(String(n)) +
+        ' 日内</strong>、<strong>全部</strong>用户行；环比为与<strong>上一祈愿期</strong>同一窗口对比。</p>',
+    );
+    summaryLines.push(
+      '<p class="promo-reach-summary__p">该项目上线至今<strong>累计资源曝光用户数</strong> ' +
+        (curM.imp != null && Number.isFinite(curM.imp)
+          ? '<strong class="promo-reach-num">' +
+            esc(fmtInt(curM.imp)) +
+            '</strong>' +
+            yImp
+          : '<span class="promo-reach-miss">监测表未匹配累计曝光类字段（如「累计曝光用户数」「资源累计曝光uv」等）</span>') +
+        '。</p>',
+    );
+    summaryLines.push(
+      '<p class="promo-reach-summary__p"><strong>曝光转化 UCTR</strong>（点击/曝光） ' +
+        (curM.uctr != null && Number.isFinite(curM.uctr)
+          ? '<strong class="promo-reach-num">' + esc(fmtPct(curM.uctr)) + '</strong>' + yU
+          : '<span class="promo-reach-miss">未匹配 UCTR 或「全局点击uv / 全局曝光uv」推导</span>') +
+        '。</p>',
+    );
+
+    const splitFiltered = filterTargetSplitChartRows(state.splitRows || [], aid, topicName, pNo);
+    const chartHtml = buildTargetUserSplitChartBlockHtml(splitFiltered);
+
+    return (
+      '<div class="promo-reach-default">' +
+      '<div class="promo-reach-summary">' +
+      summaryLines.join('') +
+      '</div>' +
+      '<div class="promo-split-chart-wrap">' +
+      '<div class="promo-split-chart-title">目标用户拆分（文件夹「目标用户拆分」）</div>' +
+      chartHtml +
+      '</div>' +
+      '<details class="promo-reach-more">' +
+      '<summary class="promo-reach-more-sum">展开 · 监测表触达条形（目标触达率等）</summary>' +
+      '<div class="promo-reach-more-body">' +
+      launchRowsHtml +
+      '</div></details>' +
+      '</div>'
+    );
+  }
+
   function buildPeriodBoardArticle(sumRow) {
     const pNo = periodNum(sumRow);
     const aid = val(sumRow, '活动标识');
@@ -1464,9 +1690,9 @@
       poolBlock +
       poolOl +
       '</section>' +
-      '<section class="review-mod">' +
+      '<section class="review-mod review-mod--promo">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">②</span> 宣发与触达</h3>' +
-      launchRows +
+      buildPromoReachSectionHtml(sumRow, n, pa, launchRows) +
       launchOl +
       '</section>' +
       '</div>' +
@@ -1940,6 +2166,52 @@
     return { merged, scanned, kept };
   }
 
+  function parseLooseCsvToRows(text, logLabel) {
+    const acc = [];
+    const errs = [];
+    let scanned = 0;
+    Papa.parse(text, {
+      header: true,
+      skipEmptyLines: 'greedy',
+      worker: false,
+      error(e) {
+        errs.push({ type: 'fatal', message: String((e && e.message) || e) });
+      },
+      step(results) {
+        if (results.errors && results.errors.length) {
+          for (let i = 0; i < results.errors.length; i++) errs.push(results.errors[i]);
+        }
+        const raw = results.data;
+        if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return;
+        scanned += 1;
+        acc.push(normalizeRowKeys(raw));
+      },
+      complete(results) {
+        if (results && results.errors && results.errors.length) {
+          for (let i = 0; i < results.errors.length; i++) errs.push(results.errors[i]);
+        }
+      },
+    });
+    if (errs.length) {
+      console.warn('[wish-review-dynamic] split', logLabel || 'CSV', errs.slice(0, 5));
+    }
+    return { rows: acc, scanned, kept: acc.length };
+  }
+
+  function ingestSplitCsvParts(parts, labelPrefix) {
+    let merged = [];
+    let scanned = 0;
+    let kept = 0;
+    if (!parts || !parts.length) return { merged, scanned, kept };
+    for (let pi = 0; pi < parts.length; pi++) {
+      const one = parseLooseCsvToRows(parts[pi].text, parts[pi].name || labelPrefix);
+      scanned += one.scanned;
+      kept += one.kept;
+      merged = merged.concat(one.rows);
+    }
+    return { merged, scanned, kept };
+  }
+
   async function loadFromBinding() {
     const status = $('wishReviewDashStatus');
     const src = $('wishReviewDashSource');
@@ -1979,6 +2251,7 @@
       state.modelPackByGenre.clear();
       state.layerRows = [];
       state.layerIndex = new Map();
+      state.splitRows = [];
       state.workRows = [];
       state.topics = [];
       if (typeof window !== 'undefined') window.__WISH_REVIEW_BUNDLE_DATA__ = null;
@@ -1998,6 +2271,7 @@
     let benchScanned = 0;
     let benchKept = 0;
     let layerMerged = [];
+    let splitMerged = [];
 
     try {
       if (parts) {
@@ -2035,6 +2309,12 @@
         csvScannedTotal += ingL.scanned;
         csvKeptBeforeDedupe += ingL.kept;
       }
+      if (isBundle && raw.split && raw.split.parts && raw.split.parts.length) {
+        const ingS = ingestSplitCsvParts(raw.split.parts, '目标用户拆分');
+        splitMerged = ingS.merged;
+        csvScannedTotal += ingS.scanned;
+        csvKeptBeforeDedupe += ingS.kept;
+      }
     } catch (e) {
       if (status) {
         status.hidden = false;
@@ -2052,6 +2332,7 @@
     state.snapCacheMerged = buildSnapRevCache(state.mergedRows);
     state.layerRows = dedupeLayerRows(layerMerged);
     state.layerIndex = buildLayerRowIndex(state.layerRows);
+    state.splitRows = dedupeTargetSplitRows(splitMerged);
     state.workRows = [];
 
     const lastMod = isBundle ? raw.lastModified || mainBlock.lastModified : mainBlock.lastModified;
@@ -2064,6 +2345,7 @@
         csvScannedRows: csvScannedTotal,
         csvKeptBeforeDedupeRows: csvKeptBeforeDedupe,
         layerRowCount: state.layerRows.length,
+        splitRowCount: state.splitRows.length,
         workRowCount: 0,
         loadedAt: Date.now(),
         note: '',

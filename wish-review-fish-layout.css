@@ -581,6 +581,146 @@
       font-size: 0.78rem;
       color: #64748b;
     }
+    /* ② 宣发与触达：文案 + 目标用户拆分表 */
+    .review-mod--promo .promo-reach-summary {
+      margin: 0 0 14px;
+      padding: 12px 14px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      line-height: 1.55;
+      color: #334155;
+    }
+    .promo-reach-summary__tag {
+      display: inline-block;
+      margin-right: 6px;
+      padding: 1px 8px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: #4338ca;
+      background: #e0e7ff;
+      border-radius: 4px;
+      vertical-align: 0.08em;
+    }
+    .promo-reach-summary__p {
+      margin: 0 0 8px;
+    }
+    .promo-reach-summary__p:last-child {
+      margin-bottom: 0;
+    }
+    .promo-reach-num {
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .promo-reach-miss {
+      color: #94a3b8;
+      font-size: 0.78rem;
+    }
+    .promo-yoy--up {
+      color: #dc2626;
+      font-weight: 600;
+    }
+    .promo-yoy--down {
+      color: #16a34a;
+      font-weight: 600;
+    }
+    .promo-yoy--flat {
+      color: #64748b;
+      font-weight: 600;
+    }
+    .promo-split-chart-wrap {
+      margin-top: 4px;
+    }
+    .promo-split-chart-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin: 0 0 10px;
+    }
+    .promo-split-table-scroll {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .promo-split-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.76rem;
+      min-width: 320px;
+    }
+    .promo-split-table th,
+    .promo-split-table td {
+      border: 1px solid #e2e8f0;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: middle;
+    }
+    .promo-split-table th {
+      background: #f1f5f9;
+      font-weight: 600;
+      color: #475569;
+    }
+    .promo-split-td-type {
+      white-space: nowrap;
+      max-width: 10rem;
+    }
+    .promo-split-barCell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 120px;
+    }
+    .promo-split-barTrack {
+      flex: 1;
+      min-width: 48px;
+      height: 10px;
+      background: #e5e9f2;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .promo-split-barFill {
+      height: 100%;
+      border-radius: 999px;
+      min-width: 2px;
+    }
+    .promo-split-barFill--reach {
+      background: linear-gradient(90deg, #0891b2, #0e7490);
+    }
+    .promo-split-barFill--rev {
+      background: linear-gradient(90deg, #6366f1, #4f46e5);
+    }
+    .promo-split-barLab {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #0f172a;
+      flex-shrink: 0;
+      min-width: 3.2rem;
+      text-align: right;
+      font-size: 0.72rem;
+    }
+    .promo-reach-more {
+      margin-top: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fafbfc;
+    }
+    .promo-reach-more-sum {
+      cursor: pointer;
+      padding: 8px 12px;
+      font-weight: 600;
+      font-size: 0.78rem;
+      color: #475569;
+      list-style: none;
+    }
+    .promo-reach-more-sum::-webkit-details-marker {
+      display: none;
+    }
+    .promo-reach-more[open] .promo-reach-more-sum {
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .promo-reach-more-body {
+      padding: 10px 12px 12px;
+    }
     .review-mod-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);

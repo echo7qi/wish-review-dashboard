@@ -13,6 +13,7 @@ const BUNDLE_SUBS = {
   main: ['整体数据监测'],
   work: ['作品明细表'],
   layer: ['分层用户监测'],
+  split: ['目标用户拆分'],
 };
 
 const SUB_LABEL = {
@@ -20,6 +21,7 @@ const SUB_LABEL = {
   work: '作品明细表',
   bench: '历史品类池（与整体数据监测同夹）',
   layer: '分层用户监测',
+  split: '目标用户拆分',
 };
 
 async function resolveReviewRootFromBoundRoot(rootHandle) {
@@ -315,6 +317,7 @@ async function scanBundleFromRoot(rootHandle) {
 
   await oneMergeAllInSubdir('work', BUNDLE_SUBS.work);
   await oneMergeAllInSubdir('layer', BUNDLE_SUBS.layer);
+  await oneMergeAllInSubdir('split', BUNDLE_SUBS.split);
 
   return result;
 }
@@ -510,8 +513,8 @@ async function readMonitorCsvFromBoundRoot() {
 }
 
 /**
- * 读取：整体数据监测（监测表合并）+ 同夹对标池 + 「分层用户监测」子目录内全部 CSV（mtime 升序合并）。
- * 与生成脚本 data-bundle 约定一致；作品明细表仍不由此入口加载，以免大文件 OOM。
+ * 读取：整体数据监测（监测表合并）+ 同夹对标池 + 「分层用户监测」+「目标用户拆分」子目录内全部 CSV（mtime 升序合并）。
+ * 作品明细表仍不由此入口加载，以免大文件 OOM。
  */
 async function readMonitorAndBenchFromBoundRoot() {
   const root = await getBoundDirHandle();
@@ -581,15 +584,37 @@ async function readMonitorAndBenchFromBoundRoot() {
     }
   }
 
+  const splitSub = await resolveFirstChildDir(review.handle, BUNDLE_SUBS.split);
+  let splitRes = {
+    ok: true,
+    skipped: true,
+    parts: [],
+    fileNames: [],
+    fileName: '',
+    lastModified: 0,
+  };
+  if (splitSub) {
+    const splitMetas = listAllCsvMetasSortedAsc(await listCsvWithMtime(splitSub.handle));
+    if (splitMetas.length) {
+      splitRes = {
+        ok: true,
+        skipped: false,
+        ...finalizeCsvPartsResult(await readTextPartsFromDir(splitSub.handle, splitMetas)),
+      };
+    }
+  }
+
   const lm = mainRes.lastModified || 0;
   const lb = benchRes.lastModified || 0;
   const ll = layerRes.lastModified || 0;
+  const ls = splitRes.lastModified || 0;
   return {
     ok: true,
     main: mainRes,
     bench: benchRes,
     layer: layerRes,
-    lastModified: Math.max(lm, lb, ll),
+    split: splitRes,
+    lastModified: Math.max(lm, lb, ll, ls),
   };
 }
 
