@@ -62,10 +62,12 @@
 
   /**
    * 解析监测 CSV：逐行过滤后再入内存（见 isDashboardUsefulRow）。
+   * @returns {{ rows: object[], scanned: number, kept: number }}
    */
   function parseMonitoringCsvToAllRows(text, logLabel) {
     const acc = [];
     const errs = [];
+    let scanned = 0;
     Papa.parse(text, {
       header: true,
       skipEmptyLines: 'greedy',
@@ -79,6 +81,7 @@
         }
         const raw = results.data;
         if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return;
+        scanned += 1;
         const row = normalizeRowKeys(raw);
         if (!isDashboardUsefulRow(row)) return;
         acc.push(row);
@@ -92,7 +95,7 @@
     if (errs.length) {
       console.warn('[wish-review-dynamic]', logLabel || 'CSV', errs.slice(0, 10));
     }
-    return acc;
+    return { rows: acc, scanned, kept: acc.length };
   }
 
   /** 多文件合并：同一活动+数据分类+周期+用户类型 只保留一行（后读入的文件覆盖先读的，时间序由 wish-review.js 从旧到新） */
@@ -962,18 +965,24 @@
     }
     const parts = mainBlock.parts && mainBlock.parts.length ? mainBlock.parts : null;
     let mergedRows = [];
+    let csvScannedTotal = 0;
+    let csvKeptBeforeDedupe = 0;
     try {
       if (parts) {
         for (let pi = 0; pi < parts.length; pi++) {
-          mergedRows = mergedRows.concat(
-            parseMonitoringCsvToAllRows(parts[pi].text, parts[pi].name),
-          );
+          const one = parseMonitoringCsvToAllRows(parts[pi].text, parts[pi].name);
+          csvScannedTotal += one.scanned;
+          csvKeptBeforeDedupe += one.kept;
+          mergedRows = mergedRows.concat(one.rows);
         }
       } else if (mainBlock.text) {
-        mergedRows = parseMonitoringCsvToAllRows(
+        const one = parseMonitoringCsvToAllRows(
           mainBlock.text,
           mainBlock.fileName || '监测表',
         );
+        csvScannedTotal = one.scanned;
+        csvKeptBeforeDedupe = one.kept;
+        mergedRows = one.rows;
       } else {
         if (status) {
           status.textContent = '读取结果缺少 CSV 内容，请刷新页面后重试。';
@@ -992,6 +1001,8 @@
     if (typeof window !== 'undefined') {
       window.__WISH_REVIEW_BUNDLE_DATA__ = {
         mainRowCount: state.rows.length,
+        csvScannedRows: csvScannedTotal,
+        csvKeptBeforeDedupeRows: csvKeptBeforeDedupe,
         benchRowCount: 0,
         layerRowCount: 0,
         workRowCount: 0,
@@ -1009,13 +1020,19 @@
     const mtime = new Date(mainBlock.lastModified).toLocaleString('zh-CN', { hour12: false });
     const nFiles = parts ? parts.length : 1;
     if (status) {
+      const n = (x) => (x != null ? Math.round(x).toLocaleString('zh-CN') : '0');
+      const scanHint =
+        csvScannedTotal > 0
+          ? ` · CSV 扫描 ${n(csvScannedTotal)} 行 → 规则保留 ${n(csvKeptBeforeDedupe)} → 去重后 ${n(state.rows.length)}`
+          : '';
       status.textContent =
         (nFiles > 1
-          ? `已合并 ${nFiles} 个监测 CSV → ${state.rows.length} 行（跨文件去重后）`
-          : `已加载 ${state.rows.length} 行`) +
+          ? `已合并 ${nFiles} 个监测 CSV → ${n(state.rows.length)} 行（跨文件去重后）`
+          : `已加载 ${n(state.rows.length)} 行`) +
+        scanHint +
         ` · ${built.topicCount} 个专题 · ${built.activityDedupCount} 个祈愿活动` +
         `（汇总·全部 原始 ${built.rawSummaryCount} 行，专题内按活动标识去重）` +
-        ' · 已过滤无关明细行；右侧默认最新一期复盘；对标池/分层/作品明细等未合并载入';
+        ' · 右侧默认最新一期；对标池/分层/作品明细等未合并载入';
     }
     if (src) {
       const label =
