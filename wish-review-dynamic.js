@@ -1043,6 +1043,16 @@
 
   const INCOME_STRUCTURE_DENY_KEYS = new Set(['对应人群收入占比']);
 
+  const INCOME_STRUCTURE_CHART_COLORS = [
+    '#4f46e5',
+    '#0d9488',
+    '#7c3aed',
+    '#d97706',
+    '#db2777',
+    '#0891b2',
+    '#64748b',
+  ];
+
   /** 收入结构：监测表中带「贡献收入占比」的列，按表头原文逐行展示（不合并为礼/券/其余） */
   function collectIncomeStructurePairs(pa) {
     if (!pa || typeof pa !== 'object') return [];
@@ -1070,6 +1080,17 @@
         '<p class="review-mod-note">监测表未匹配到「…贡献收入占比」类字段，无法展示收入结构。</p>'
       );
     }
+    let chartInner = '';
+    for (let i = 0; i < pairs.length; i++) {
+      const p = pairs[i];
+      const c = INCOME_STRUCTURE_CHART_COLORS[i % INCOME_STRUCTURE_CHART_COLORS.length];
+      chartInner += hbarHtml(
+        p.key,
+        Math.min(1, Math.max(0, p.pct)),
+        fmtPct(p.pct),
+        c,
+      );
+    }
     const rows = pairs.map(
       (p) =>
         '<tr><th scope="row" class="rv-income-structure-field">' +
@@ -1080,7 +1101,12 @@
     );
     return (
       '<div class="rv-income-structure-wrap">' +
+      '<p class="rv-income-structure-chart-caption">横向条为各字段占比（满宽＝100%）；含合计类字段时可能与分项加总接近，以监测表为准。</p>' +
+      '<div class="rv-income-structure-chart" role="group" aria-label="贡献收入占比条形图">' +
+      chartInner +
+      '</div>' +
       '<table class="rv-income-structure-table">' +
+      '<thead><tr><th scope="col">监测表字段</th><th scope="col">占比</th></tr></thead>' +
       '<tbody>' +
       rows.join('') +
       '</tbody></table>' +

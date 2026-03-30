@@ -1072,6 +1072,45 @@
     .rv-income-structure-wrap {
       margin: 0 0 4px;
     }
+    .rv-income-structure-chart-caption {
+      margin: 0 0 8px;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      color: #64748b;
+    }
+    .rv-income-structure-chart {
+      margin: 0 0 14px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+    }
+    .rv-income-structure-chart .rv-hbar-row {
+      grid-template-columns: minmax(5rem, 42%) minmax(72px, 1fr) 3.2rem;
+      gap: 8px 10px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .rv-income-structure-chart .rv-hbar-row:last-child {
+      margin-bottom: 0;
+    }
+    .rv-income-structure-chart .rv-hbar-lab {
+      word-break: break-word;
+      line-height: 1.35;
+      font-size: 0.74rem;
+    }
+    .rv-income-structure-chart .rv-hbar-track {
+      height: 12px;
+    }
+    @media (max-width: 520px) {
+      .rv-income-structure-chart .rv-hbar-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+      .rv-income-structure-chart .rv-hbar-val {
+        text-align: left;
+      }
+    }
     .rv-income-structure-table {
       width: 100%;
       border-collapse: collapse;
