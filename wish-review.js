@@ -22,6 +22,15 @@ const SUB_LABEL = {
   layer: '分层用户监测',
 };
 
+async function resolveReviewRootFromBoundRoot(rootHandle) {
+  if (!rootHandle) return null;
+  const rootName = typeof rootHandle.name === 'string' ? rootHandle.name : '';
+  if (rootName && REVIEW_ROOT_CANDIDATES.includes(rootName)) {
+    return { handle: rootHandle, name: rootName };
+  }
+  return resolveFirstChildDir(rootHandle, REVIEW_ROOT_CANDIDATES);
+}
+
 // ─── Local "fish" full 5D HTML index (read via File System Access API) ───
 // Map: `${topic}||${periodNo}` -> { fileHandle, fileName, topic, periodNo }
 let fishHtmlIndex = null;
@@ -99,7 +108,7 @@ async function ensureFishHtmlIndex() {
     }
   }
 
-  const review = await resolveFirstChildDir(root, REVIEW_ROOT_CANDIDATES);
+  const review = await resolveReviewRootFromBoundRoot(root);
   if (!review) {
     fishHtmlIndex = new Map();
     return fishHtmlIndex;
@@ -141,7 +150,7 @@ async function scanMonitorCsvMetaFromBoundRoot() {
     if (req !== 'granted') return { ok: false, error: '未获得文件夹读取权限。' };
   }
 
-  const review = await resolveFirstChildDir(root, REVIEW_ROOT_CANDIDATES);
+  const review = await resolveReviewRootFromBoundRoot(root);
   if (!review) return { ok: false, error: '未找到祈愿收入复盘目录（在绑定根目录下）。' };
 
   const mainSub = await resolveFirstChildDir(review.handle, BUNDLE_SUBS.main);
@@ -298,7 +307,7 @@ async function scanBundleFromRoot(rootHandle) {
     if (req !== 'granted') throw new Error('未获得文件夹读取权限。');
   }
 
-  const review = await resolveFirstChildDir(rootHandle, REVIEW_ROOT_CANDIDATES);
+  const review = await resolveReviewRootFromBoundRoot(rootHandle);
   if (!review) {
     throw new Error(
       `未找到「${REVIEW_ROOT_CANDIDATES.join('」或「')}」文件夹。请在绑定的「资源位数据更新」目录下创建「祈愿收入复盘」。`,
@@ -465,7 +474,7 @@ async function readFullWishReviewBundleFromBoundRoot() {
       return { ok: false, error: '未获得文件夹读取权限。', main: null };
     }
   }
-  const review = await resolveFirstChildDir(root, REVIEW_ROOT_CANDIDATES);
+  const review = await resolveReviewRootFromBoundRoot(root);
   if (!review) {
     return {
       ok: false,
@@ -574,7 +583,7 @@ async function readMonitorCsvFromBoundRoot() {
       return { ok: false, error: '未获得文件夹读取权限。' };
     }
   }
-  const review = await resolveFirstChildDir(root, REVIEW_ROOT_CANDIDATES);
+  const review = await resolveReviewRootFromBoundRoot(root);
   if (!review) {
     return {
       ok: false,
