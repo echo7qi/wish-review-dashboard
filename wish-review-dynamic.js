@@ -581,19 +581,41 @@
     return '';
   }
 
-  function buildFunnelSegmentHtml(label, value, max, colors) {
-    const vNum = value == null ? 0 : Math.max(0, value);
-    const missing = value == null || vNum <= 0 || !Number.isFinite(vNum);
-    const w = max > 0 ? (vNum / max) * 100 : 0;
-    const wShown = missing ? 10 : Math.max(10, w);
-    const color = missing ? '#e5e7eb' : colors;
-    const valText = value == null || !Number.isFinite(vNum) ? '—' : fmtInt(vNum);
+  /**
+   * 漏斗单行：左标签 + 右数值；自第二行起「占上一级」转化率；全宽轨道 + 相对「目标用户数」比例的渐变填充（参考设计稿条形漏斗）。
+   */
+  function buildFunnelStepHtml(stepIndex, label, value, prevValue, topForBar) {
+    const vNum =
+      value == null || !Number.isFinite(value) ? null : Math.max(0, value);
+    const valText = vNum == null ? '—' : fmtInt(vNum);
+    const top = topForBar != null && topForBar > 0 ? topForBar : 0;
+    const fillPct = vNum == null || top <= 0 ? 0 : Math.min(100, (vNum / top) * 100);
+
+    let convRow = '';
+    if (stepIndex > 0) {
+      let convStr = '—';
+      if (
+        vNum != null &&
+        prevValue != null &&
+        Number.isFinite(prevValue) &&
+        prevValue > 0
+      ) {
+        convStr = `${((vNum / prevValue) * 100).toFixed(1)}%`;
+      }
+      convRow = `<div class="rv-funnelStep__conv">占上一级 ${esc(convStr)}</div>`;
+    }
+
     return (
-      `<div class="rv-funnelSegWrap" style="width:${wShown.toFixed(1)}%">` +
-      `<div class="rv-funnelSeg" style="background:${esc(color)}">` +
-      `<div class="rv-funnelSeg__val">${esc(valText)}</div>` +
-      `<div class="rv-funnelSeg__lab">${esc(label)}</div>` +
-      `</div></div>`
+      `<div class="rv-funnelStep">` +
+      `<div class="rv-funnelStep__row">` +
+      `<span class="rv-funnelStep__label">${esc(label)}</span>` +
+      `<span class="rv-funnelStep__val">${esc(valText)}</span>` +
+      `</div>` +
+      convRow +
+      `<div class="rv-funnelStep__bar" role="presentation">` +
+      `<div class="rv-funnelStep__fill" style="width:${fillPct.toFixed(1)}%"></div>` +
+      `</div>` +
+      `</div>`
     );
   }
 
@@ -666,10 +688,10 @@
     };
 
     const targets = [
-      { label: '全部用户', colors: '#4f46e5' },
-      { label: '目标阅读用户', colors: '#0ea5e9' },
-      { label: '目标IP付费用户', colors: '#f59e0b' },
-      { label: '非目标阅读用户', colors: '#16a34a' },
+      { label: '全部用户' },
+      { label: '目标阅读用户' },
+      { label: '目标IP付费用户' },
+      { label: '非目标阅读用户' },
     ];
 
     function stepValuesFromRow(row) {
@@ -681,19 +703,32 @@
       return { target, reach, draw, pay };
     }
 
+    const stepDefs = [
+      { label: '目标用户数', key: 'target' },
+      { label: '触达用户数', key: 'reach' },
+      { label: '抽卡用户数', key: 'draw' },
+      { label: '付费抽卡用户数', key: 'pay' },
+    ];
+
     const funnelCardsHtml = targets
       .map((t) => {
-        const row = pickRowByCategory(t.label);
-        const v = stepValuesFromRow(row);
-        const max = Math.max(v.target || 0, v.reach || 0, v.draw || 0, v.pay || 0);
+        const r = pickRowByCategory(t.label);
+        const v = stepValuesFromRow(r);
+        const topForBar =
+          v.target != null && v.target > 0
+            ? v.target
+            : Math.max(v.target || 0, v.reach || 0, v.draw || 0, v.pay || 0);
+        const vals = stepDefs.map((s) => v[s.key]);
+        let stepsInner = '';
+        for (let si = 0; si < stepDefs.length; si++) {
+          const prevVal = si === 0 ? null : vals[si - 1];
+          stepsInner += buildFunnelStepHtml(si, stepDefs[si].label, vals[si], prevVal, topForBar);
+        }
         return (
           `<div class="rv-funnelCard">` +
           `<div class="rv-funnelCard__title">${esc(t.label)}</div>` +
           `<div class="rv-funnel">` +
-          buildFunnelSegmentHtml('目标用户数', v.target, max, '#4f46e5') +
-          buildFunnelSegmentHtml('触达用户数', v.reach, max, '#0ea5e9') +
-          buildFunnelSegmentHtml('抽卡用户数', v.draw, max, '#f59e0b') +
-          buildFunnelSegmentHtml('付费抽卡用户数', v.pay, max, '#16a34a') +
+          stepsInner +
           `</div>` +
           `</div>`
         );
