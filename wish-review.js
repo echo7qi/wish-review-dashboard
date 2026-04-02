@@ -14,6 +14,7 @@ const BUNDLE_SUBS = {
   work: ['作品明细表'],
   layer: ['分层用户监测'],
   split: ['目标用户拆分'],
+  access: ['访问贡献'],
 };
 
 const SUB_LABEL = {
@@ -22,6 +23,7 @@ const SUB_LABEL = {
   bench: '历史品类池（与整体数据监测同夹）',
   layer: '分层用户监测',
   split: '目标用户拆分',
+  access: '访问贡献',
 };
 
 async function resolveReviewRootFromBoundRoot(rootHandle) {
@@ -318,6 +320,7 @@ async function scanBundleFromRoot(rootHandle) {
   await oneMergeAllInSubdir('work', BUNDLE_SUBS.work);
   await oneMergeAllInSubdir('layer', BUNDLE_SUBS.layer);
   await oneMergeAllInSubdir('split', BUNDLE_SUBS.split);
+  await oneMergeAllInSubdir('access', BUNDLE_SUBS.access);
 
   return result;
 }
@@ -513,7 +516,7 @@ async function readMonitorCsvFromBoundRoot() {
 }
 
 /**
- * 读取：整体数据监测（监测表合并）+ 同夹对标池 + 「分层用户监测」+「目标用户拆分」子目录内全部 CSV（mtime 升序合并）。
+ * 读取：整体数据监测（监测表合并）+ 同夹对标池 + 「分层用户监测」+「目标用户拆分」+「访问贡献」子目录内全部 CSV（mtime 升序合并）。
  * 作品明细表仍不由此入口加载，以免大文件 OOM。
  */
 async function readMonitorAndBenchFromBoundRoot() {
@@ -604,17 +607,39 @@ async function readMonitorAndBenchFromBoundRoot() {
     }
   }
 
+  const accessSub = await resolveFirstChildDir(review.handle, BUNDLE_SUBS.access);
+  let accessRes = {
+    ok: true,
+    skipped: true,
+    parts: [],
+    fileNames: [],
+    fileName: '',
+    lastModified: 0,
+  };
+  if (accessSub) {
+    const accessMetas = listAllCsvMetasSortedAsc(await listCsvWithMtime(accessSub.handle));
+    if (accessMetas.length) {
+      accessRes = {
+        ok: true,
+        skipped: false,
+        ...finalizeCsvPartsResult(await readTextPartsFromDir(accessSub.handle, accessMetas)),
+      };
+    }
+  }
+
   const lm = mainRes.lastModified || 0;
   const lb = benchRes.lastModified || 0;
   const ll = layerRes.lastModified || 0;
   const ls = splitRes.lastModified || 0;
+  const la = accessRes.lastModified || 0;
   return {
     ok: true,
     main: mainRes,
     bench: benchRes,
     layer: layerRes,
     split: splitRes,
-    lastModified: Math.max(lm, lb, ll, ls),
+    access: accessRes,
+    lastModified: Math.max(lm, lb, ll, ls, la),
   };
 }
 

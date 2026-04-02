@@ -233,6 +233,37 @@
     return Array.from(m.values());
   }
 
+  function normalizeDateKey(raw) {
+    const t = parseLaunchDate(raw);
+    if (t == null) return '';
+    return new Date(t).toISOString().slice(0, 10);
+  }
+
+  function normalizePrimarySourceName(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (s === '广告资源投放' || s === 'v2资源投放') return '运营资源投放';
+    return s;
+  }
+
+  function dedupeAccessRows(rows) {
+    const m = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const project = String(
+        valFuzzy(r, ['活动名称【修正】', '活动名称【修正】 ', '活动名称', '专题名称']) || '',
+      ).trim();
+      const launchKey = normalizeDateKey(valFuzzy(r, ['上线时间', '上线日期', '活动上线时间']));
+      const source = normalizePrimarySourceName(
+        valFuzzy(r, ['一级来源', '来源一级', '访问一级来源', '来源']),
+      );
+      if (!project || !launchKey || !source) continue;
+      const k = [project, launchKey, source].join('\x01');
+      m.set(k, r);
+    }
+    return Array.from(m.values());
+  }
+
   const LAYER_ORDER = [
     '[200+)',
     '[100-200)',
@@ -971,6 +1002,7 @@
     layerRows: [],
     layerIndex: new Map(),
     splitRows: [],
+    accessRows: [],
     workRows: [],
     topics: [],
     fileName: '',
@@ -1204,7 +1236,7 @@
     const tgtUserShare = pyes ? rate01(val(pyes, '对应人群收入占比')) : null;
     if (join != null) {
       if (join < 0.12) {
-        items.push('参与付费率偏低，可结合礼包/券结构（①）与触达（②）排查转化断点。');
+        items.push('参与付费率偏低，可结合礼包/券结构（②）与访问来源贡献（③）排查转化断点。');
       } else if (join < 0.18) {
         items.push('参与付费率中等略偏低，关注免费抽占比与进付费抽引导。');
       } else {
@@ -1373,7 +1405,7 @@
     if (!pa) {
       return (
         '<section class="period-next-strategy period-next-strategy--empty">' +
-        '<h3 class="period-next-strategy__title"><span class="period-next-strategy__badge">⑥</span>给业务的下一步策略</h3>' +
+        '<h3 class="period-next-strategy__title"><span class="period-next-strategy__badge">⑦</span>给业务的下一步策略</h3>' +
         '<p class="review-mod-note">当前无快照数据，无法生成策略建议。</p>' +
         '</section>'
       );
@@ -1408,7 +1440,7 @@
       );
     } else if (tgt != null && tgt < 0.2) {
       items.push(
-        '触达仍有抬升空间：可补充定向曝光或档期内的二次触达，并结合②宣发与触达模块看渠道效率。',
+        '触达仍有抬升空间：可补充定向曝光或档期内的二次触达，并结合③访问来源贡献模块看渠道效率。',
       );
     }
 
@@ -1476,7 +1508,7 @@
 
     return (
       '<section class="period-next-strategy" aria-label="给业务的下一步策略">' +
-      '<h3 class="period-next-strategy__title"><span class="period-next-strategy__badge">⑥</span>给业务的下一步策略</h3>' +
+      '<h3 class="period-next-strategy__title"><span class="period-next-strategy__badge">⑦</span>给业务的下一步策略</h3>' +
       '<p class="period-next-strategy__hint">以下为基于本期监测数据的启发式建议，执行前请结合活动阶段、预算与合规要求评审。</p>' +
       '<ol class="period-next-strategy__list">' +
       items.map((t) => '<li>' + esc(t) + '</li>').join('') +
@@ -1658,195 +1690,258 @@
     return '<span class="promo-yoy' + mod + '">（上一期' + sign + rounded + '%）</span>';
   }
 
-  /** 监测表「当前累计·全部」行：累计曝光用户数、UCTR（列名模糊或点击/曝光推导） */
-  function extractPromoCumulativeFromPa(pa) {
-    if (!pa) return { imp: null, uctr: null };
-    const imp = toNum(
-      valFuzzy(pa, [
-        '累计曝光用户数',
-        '资源累计曝光用户数',
-        '累计资源曝光uv',
-        '上线至今累计曝光用户数',
-        '宣发累计曝光用户数',
-        '全局累计曝光uv',
-        '资源曝光用户数',
-        '资源曝光uv累计',
-      ]),
-    );
-    let uctr = rate01(
-      valFuzzy(pa, [
-        '曝光UCTR',
-        'UCTR',
-        'U-CTR',
-        'Uctr',
-        '曝光转化率',
-        '资源曝光UCTR',
-      ]),
-    );
-    if (uctr == null) {
-      const clk = toNum(
-        valFuzzy(pa, ['全局点击uv', '累计点击用户数', '资源累计点击uv', '累计点击uv']),
-      );
-      const im2 =
-        imp != null && imp > 0
-          ? imp
-          : toNum(valFuzzy(pa, ['全局曝光uv', '累计曝光uv', '资源曝光uv累计']));
-      if (clk != null && im2 != null && im2 > 0) uctr = clk / im2;
+  const ACCESS_METRIC_SPECS = [
+    {
+      key: 'visit',
+      label: '访问贡献',
+      shareKeys: ['访问贡献占比', '访问贡献', '访问UV贡献占比', '访问用户贡献占比', '访问占比'],
+      absKeys: ['访问UV', '访问用户数', '访问人数', '访问量'],
+      color: '#0891b2',
+    },
+    {
+      key: 'draw',
+      label: '抽卡贡献',
+      shareKeys: ['抽卡贡献占比', '抽卡贡献', '抽卡用户贡献占比'],
+      absKeys: ['抽卡用户数', '抽卡人数', '抽卡UV'],
+      color: '#4f46e5',
+    },
+    {
+      key: 'payDraw',
+      label: '付费抽卡贡献',
+      shareKeys: ['付费抽卡贡献占比', '付费抽卡贡献', '付费抽用户贡献占比'],
+      absKeys: ['付费抽卡用户数', '付费抽卡人数', '付费抽用户数'],
+      color: '#7c3aed',
+    },
+    {
+      key: 'payAmt',
+      label: '付费金额贡献',
+      shareKeys: ['付费金额贡献占比', '付费金额贡献', '收入贡献占比', '收入贡献'],
+      absKeys: ['付费金额', '付费收入', '收入金额'],
+      color: '#d97706',
+    },
+  ];
+
+  function parseAccessContributionRow(r) {
+    const out = {};
+    for (let i = 0; i < ACCESS_METRIC_SPECS.length; i++) {
+      const s = ACCESS_METRIC_SPECS[i];
+      out[s.key] = {
+        share: rate01(valFuzzy(r, s.shareKeys)),
+        abs: toNum(valFuzzy(r, s.absKeys)),
+      };
     }
-    return { imp, uctr };
+    return out;
   }
 
-  function filterTargetSplitChartRows(rows, aid, topicName, pNo) {
-    const pStr = String(pNo).trim();
-    const out = [];
+  function buildProjectAccessPeriods(sumRow) {
+    const project = String(
+      val(sumRow, '活动名称【修正】') || val(sumRow, '活动名称') || val(sumRow, '专题名称') || '',
+    ).trim();
+    if (!project) return { project: '', current: null, previous: null, history: [], periods: [] };
+    const currentLaunchKey = normalizeDateKey(val(sumRow, '上线日期'));
+    const periodMap = new Map();
+    const rows = state.accessRows || [];
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (aid && val(r, '活动标识') && val(r, '活动标识') !== aid) continue;
-      if (topicName && val(r, '专题名称') && val(r, '专题名称') !== topicName) continue;
-      const pCol = String(val(r, '第x次祈愿') || '').trim();
-      if (pCol && pStr && pCol !== pStr) continue;
-      out.push(r);
-    }
-    if (out.length) return out;
-    const loose = [];
-    for (let j = 0; j < rows.length; j++) {
-      const r = rows[j];
-      if (!aid || !val(r, '活动标识') || val(r, '活动标识') === aid) loose.push(r);
-    }
-    return loose;
-  }
-
-  function buildTargetUserSplitChartBlockHtml(filteredRows) {
-    if (!filteredRows.length) {
-      return (
-        '<p class="review-mod-note">未匹配到行：请在复盘根目录下提供文件夹<strong>「目标用户拆分」</strong>，CSV 含列「目标用户类型」「触达率」「累计收入不含赠」，并与本期<strong>活动标识</strong>或<strong>专题名称</strong>、<strong>期次</strong>一致。</p>'
-      );
-    }
-    const parsed = [];
-    for (let i = 0; i < filteredRows.length; i++) {
-      const r = filteredRows[i];
-      const label = String(
-        valFuzzy(r, ['目标用户类型', '用户类型', '人群类型']) || '—',
+      const rp = String(
+        valFuzzy(r, ['活动名称【修正】', '活动名称【修正】 ', '活动名称', '专题名称']) || '',
       ).trim();
-      const reach = rate01(valFuzzy(r, ['触达率', '目标触达率', '目标用户触达率']));
-      const rev = toNum(
-        valFuzzy(r, [
-          '累计收入不含赠',
-          '累计付费收入不含赠',
-          '收入不含赠',
-          '祈愿累计收入不含赠',
-          '付费收入不含赠',
-        ]),
+      if (!rp || rp !== project) continue;
+      const lk = normalizeDateKey(valFuzzy(r, ['上线时间', '上线日期', '活动上线时间']));
+      if (!lk) continue;
+      const ts = parseLaunchDate(lk);
+      const src = normalizePrimarySourceName(
+        valFuzzy(r, ['一级来源', '来源一级', '访问一级来源', '来源']),
       );
-      if (label === '—' && reach == null && rev == null) continue;
-      parsed.push({ label: label || '—', reach, rev });
+      if (!src) continue;
+      let p = periodMap.get(lk);
+      if (!p) {
+        p = { launchKey: lk, launchTs: ts || 0, sources: new Map() };
+        periodMap.set(lk, p);
+      }
+      p.sources.set(src, parseAccessContributionRow(r));
     }
-    if (!parsed.length) {
-      return (
-        '<p class="review-mod-note">「目标用户拆分」中无有效行（需「目标用户类型」「触达率」「累计收入不含赠」等列）。</p>'
-      );
+    const periods = Array.from(periodMap.values()).sort((a, b) => a.launchTs - b.launchTs);
+    if (!periods.length) return { project, current: null, previous: null, history: [], periods: [] };
+    let current = periods[periods.length - 1];
+    if (currentLaunchKey) {
+      const hit = periods.find((p) => p.launchKey === currentLaunchKey);
+      if (hit) current = hit;
     }
-    let maxRev = 0;
-    for (let j = 0; j < parsed.length; j++) {
-      if (parsed[j].rev != null && parsed[j].rev > maxRev) maxRev = parsed[j].rev;
+    const curIdx = periods.findIndex((p) => p.launchKey === current.launchKey);
+    const previous = curIdx > 0 ? periods[curIdx - 1] : null;
+    const history = periods.filter((p) => p.launchTs < current.launchTs);
+
+    for (let pi = 0; pi < periods.length; pi++) {
+      const period = periods[pi];
+      const srcNames = Array.from(period.sources.keys());
+      for (let mi = 0; mi < ACCESS_METRIC_SPECS.length; mi++) {
+        const mk = ACCESS_METRIC_SPECS[mi].key;
+        let totalAbs = 0;
+        for (let si = 0; si < srcNames.length; si++) {
+          const st = period.sources.get(srcNames[si])[mk];
+          if (st.abs != null && Number.isFinite(st.abs) && st.abs > 0) totalAbs += st.abs;
+        }
+        if (!(totalAbs > 0)) continue;
+        for (let si = 0; si < srcNames.length; si++) {
+          const st = period.sources.get(srcNames[si])[mk];
+          if (st.share == null || !Number.isFinite(st.share)) {
+            st.share = st.abs != null && Number.isFinite(st.abs) ? st.abs / totalAbs : null;
+          }
+        }
+      }
     }
-    const rowsHtml = parsed
-      .map((x) => {
-        const rw =
-          x.reach != null && Number.isFinite(x.reach) ? Math.min(100, Math.max(0, x.reach * 100)) : 0;
-        const rv =
-          x.rev != null && Number.isFinite(x.rev) && maxRev > 0
-            ? Math.min(100, Math.max(0, (x.rev / maxRev) * 100))
-            : 0;
-        return (
-          '<tr>' +
-          '<td class="promo-split-td-type">' +
-          esc(x.label) +
-          '</td>' +
-          '<td class="promo-split-td-bar"><div class="promo-split-barCell"><div class="promo-split-barTrack" title="' +
-          esc(x.reach != null ? fmtPct(x.reach) : '—') +
-          '"><div class="promo-split-barFill promo-split-barFill--reach" style="width:' +
-          rw.toFixed(1) +
-          '%"></div></div><span class="promo-split-barLab">' +
-          esc(x.reach != null ? fmtPct(x.reach) : '—') +
-          '</span></div></td>' +
-          '<td class="promo-split-td-bar"><div class="promo-split-barCell"><div class="promo-split-barTrack" title="' +
-          esc(x.rev != null ? fmtInt(x.rev) : '—') +
-          '"><div class="promo-split-barFill promo-split-barFill--rev" style="width:' +
-          rv.toFixed(1) +
-          '%"></div></div><span class="promo-split-barLab">' +
-          esc(x.rev != null ? fmtInt(x.rev) : '—') +
-          '</span></div></td>' +
-          '</tr>'
-        );
-      })
-      .join('');
+
+    return { project, current, previous, history, periods };
+  }
+
+  function avgShareFromHistory(historyPeriods, source, metricKey) {
+    const arr = [];
+    for (let i = 0; i < historyPeriods.length; i++) {
+      const m = historyPeriods[i].sources.get(source);
+      if (!m || !m[metricKey]) continue;
+      const v = m[metricKey].share;
+      if (v != null && Number.isFinite(v)) arr.push(v);
+    }
+    if (!arr.length) return null;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }
+
+  function formatDeltaPp(v) {
+    if (v == null || !Number.isFinite(v)) return '—';
+    const pp = v * 100;
+    const sign = pp > 0 ? '+' : '';
+    return `${sign}${pp.toFixed(1)}pp`;
+  }
+
+  function buildAccessSourceConclusion(current, previous, history) {
+    const lines = [];
+    const srcNames = Array.from(current.sources.keys());
+    let best = null;
+    for (let i = 0; i < srcNames.length; i++) {
+      const src = srcNames[i];
+      let score = 0;
+      let hit = 0;
+      for (let j = 0; j < ACCESS_METRIC_SPECS.length; j++) {
+        const mk = ACCESS_METRIC_SPECS[j].key;
+        const cur = current.sources.get(src)[mk].share;
+        if (cur == null || !Number.isFinite(cur)) continue;
+        const prev = previous && previous.sources.get(src) ? previous.sources.get(src)[mk].share : null;
+        const hist = avgShareFromHistory(history, src, mk);
+        if (prev != null && Number.isFinite(prev)) {
+          score += (cur - prev) * 100;
+          hit += 1;
+        }
+        if (hist != null && Number.isFinite(hist)) {
+          score += (cur - hist) * 70;
+          hit += 1;
+        }
+      }
+      if (!hit) continue;
+      if (!best || score > best.score) best = { source: src, score };
+    }
+    if (best && best.score > 2) {
+      lines.push(`本期来源贡献提升最明显的是「${best.source}」，对访问到付费链路的多指标贡献相对更优。`);
+    }
+
+    for (let j = 0; j < ACCESS_METRIC_SPECS.length; j++) {
+      const m = ACCESS_METRIC_SPECS[j];
+      let top = null;
+      for (let i = 0; i < srcNames.length; i++) {
+        const src = srcNames[i];
+        const cur = current.sources.get(src)[m.key].share;
+        if (cur == null || !Number.isFinite(cur)) continue;
+        if (!top || cur > top.v) top = { src, v: cur };
+      }
+      if (top && top.v >= 0.35) {
+        lines.push(`${m.label}当前由「${top.src}」主导（约 ${fmtPct(top.v)}）。`);
+      }
+    }
+    if (!lines.length) {
+      lines.push('各一级来源贡献分布较为均衡，建议结合成本与转化效率做精细化预算分配。');
+    }
     return (
-      '<div class="promo-split-table-scroll">' +
-      '<table class="promo-split-table">' +
-      '<thead><tr><th>目标用户类型</th><th>触达率</th><th>累计收入不含赠</th></tr></thead>' +
-      '<tbody>' +
-      rowsHtml +
-      '</tbody></table></div>'
+      '<div class="promo-reach-summary">' +
+      '<p class="promo-reach-summary__p"><span class="promo-reach-summary__tag">综合结论</span>' +
+      esc(lines.slice(0, 2).join(' ')) +
+      '</p></div>'
     );
   }
 
-  function buildPromoReachSectionHtml(sumRow, n, pa, launchRowsHtml) {
-    const pNo = periodNum(sumRow);
-    const aid = val(sumRow, '活动标识');
-    const topicName = val(sumRow, '专题名称') || '';
-    const prevSum = findPrevPeriodSummaryRow(sumRow);
-    let prevPa = null;
-    if (prevSum) {
-      const dPrev = Math.floor(toNum(val(prevSum, '已上线天数')) || 1);
-      prevPa = snapRowN(state.rows, val(prevSum, '活动标识'), dPrev).pa;
+  function buildAccessContributionSectionHtml(sumRow) {
+    if (!state.accessRows || !state.accessRows.length) {
+      return '<p class="review-mod-note">未读取到「访问贡献」文件夹内 CSV。</p>';
     }
-    const curM = extractPromoCumulativeFromPa(pa);
-    const prevM = extractPromoCumulativeFromPa(prevPa);
-    const yImp = prevSum ? yoyPercentInlineHtml(prevM.imp, curM.imp) : '';
-    const yU = prevSum ? yoyPercentInlineHtml(prevM.uctr, curM.uctr) : '';
+    const grp = buildProjectAccessPeriods(sumRow);
+    if (!grp.current) {
+      return '<p class="review-mod-note">访问贡献未匹配到当前项目（按「活动名称【修正】」+「上线时间/上线日期」）。</p>';
+    }
+    const srcNames = Array.from(grp.current.sources.keys());
+    if (!srcNames.length) {
+      return '<p class="review-mod-note">访问贡献文件中未找到有效的「一级来源」行。</p>';
+    }
+    const head =
+      '<p class="promo-reach-summary__p"><span class="promo-reach-summary__tag">口径</span>按「活动名称【修正】」归并同一项目；按上线时间区分不同期。一级来源中「广告资源投放」「v2资源投放」统一归类为「运营资源投放」。</p>';
+    const periodMeta =
+      '<p class="promo-reach-summary__p">当前期上线时间 <strong>' +
+      esc(grp.current.launchKey) +
+      '</strong>，可比历史期数 <strong>' +
+      esc(String(grp.history.length)) +
+      '</strong>，上一期 <strong>' +
+      esc(grp.previous ? grp.previous.launchKey : '—') +
+      '</strong>。</p>';
 
-    const summaryLines = [];
-    summaryLines.push(
-      '<p class="promo-reach-summary__p"><span class="promo-reach-summary__tag">口径</span>监测表<strong>当前累计</strong>、<strong>上线 ' +
-        esc(String(n)) +
-        ' 日内</strong>、<strong>全部</strong>用户行；环比为与<strong>上一祈愿期</strong>同一窗口对比。</p>',
-    );
-    summaryLines.push(
-      '<p class="promo-reach-summary__p">该项目上线至今<strong>累计资源曝光用户数</strong> ' +
-        (curM.imp != null && Number.isFinite(curM.imp)
-          ? '<strong class="promo-reach-num">' +
-            esc(fmtInt(curM.imp)) +
-            '</strong>' +
-            yImp
-          : '<span class="promo-reach-miss">监测表未匹配累计曝光类字段（如「累计曝光用户数」「资源累计曝光uv」等）</span>') +
-        '。</p>',
-    );
-    summaryLines.push(
-      '<p class="promo-reach-summary__p"><strong>曝光转化 UCTR</strong>（点击/曝光） ' +
-        (curM.uctr != null && Number.isFinite(curM.uctr)
-          ? '<strong class="promo-reach-num">' + esc(fmtPct(curM.uctr)) + '</strong>' + yU
-          : '<span class="promo-reach-miss">未匹配 UCTR 或「全局点击uv / 全局曝光uv」推导</span>') +
-        '。</p>',
-    );
-
-    const splitFiltered = filterTargetSplitChartRows(state.splitRows || [], aid, topicName, pNo);
-    const chartHtml = buildTargetUserSplitChartBlockHtml(splitFiltered);
+    const metricCards = [];
+    for (let mi = 0; mi < ACCESS_METRIC_SPECS.length; mi++) {
+      const spec = ACCESS_METRIC_SPECS[mi];
+      const arr = [];
+      for (let si = 0; si < srcNames.length; si++) {
+        const src = srcNames[si];
+        const cur = grp.current.sources.get(src)[spec.key].share;
+        if (cur == null || !Number.isFinite(cur)) continue;
+        const prev =
+          grp.previous && grp.previous.sources.get(src)
+            ? grp.previous.sources.get(src)[spec.key].share
+            : null;
+        const hist = avgShareFromHistory(grp.history, src, spec.key);
+        arr.push({ src, cur, prev, hist });
+      }
+      arr.sort((a, b) => b.cur - a.cur);
+      let rows = '';
+      for (let i = 0; i < arr.length; i++) {
+        const x = arr[i];
+        rows +=
+          '<div class="promo-source-row">' +
+          hbarHtml(x.src, x.cur, fmtPct(x.cur), spec.color) +
+          '<div class="promo-source-row__delta">' +
+          '<span>较上一期 ' +
+          esc(formatDeltaPp(x.prev != null ? x.cur - x.prev : null)) +
+          '</span>' +
+          '<span>较历史均值 ' +
+          esc(formatDeltaPp(x.hist != null ? x.cur - x.hist : null)) +
+          '</span>' +
+          '</div></div>';
+      }
+      metricCards.push(
+        '<section class="promo-source-card">' +
+          '<h4 class="promo-source-card__title">' +
+          esc(spec.label) +
+          '</h4>' +
+          (rows || '<p class="review-mod-note">当前期缺少该指标字段。</p>') +
+          '</section>',
+      );
+    }
 
     return (
       '<div class="promo-reach-default">' +
+      buildAccessSourceConclusion(grp.current, grp.previous, grp.history) +
       '<div class="promo-reach-summary">' +
-      summaryLines.join('') +
+      head +
+      periodMeta +
       '</div>' +
-      '<div class="promo-split-chart-wrap">' +
-      '<div class="promo-split-chart-title">目标用户拆分（文件夹「目标用户拆分」）</div>' +
-      chartHtml +
+      '<div class="promo-source-grid">' +
+      metricCards.join('') +
       '</div>' +
-      '<details class="promo-reach-more">' +
-      '<summary class="promo-reach-more-sum">展开 · 监测表触达条形（目标触达率等）</summary>' +
-      '<div class="promo-reach-more-body">' +
-      launchRowsHtml +
-      '</div></details>' +
       '</div>'
     );
   }
@@ -1878,27 +1973,12 @@
     const maxContributionShare = maxIncomeContributionShare(incomeStructurePairs);
 
     const tgt = pa ? rate01(val(pa, '目标触达率')) : null;
-    const tdr = pa ? rate01(val(pa, '触达抽卡率')) : null;
     const tuv = pa
       ? toNum(
           valFuzzy(pa, ['累计触达uv', '累计触达UV', '触达用户数', '触达UV']),
         )
       : null;
     const tarpu = pa ? toNum(val(pa, '触达ARPU')) : null;
-    let launchRows = '';
-    if (tgt != null) launchRows += hbarHtml('目标触达率', tgt, fmtPct(tgt), '#0891b2');
-    if (tdr != null) launchRows += hbarHtml('触达抽卡率', tdr, fmtPct(tdr), '#0e7490');
-    if (tuv != null || tarpu != null) {
-      launchRows +=
-        '<div class="rv-metric-line"><span>触达 UV</span><strong>' +
-        fmtInt(tuv) +
-        '</strong><span>触达 ARPU</span><strong>' +
-        (tarpu != null ? tarpu.toFixed(3) : '—') +
-        '</strong></div>';
-    }
-    if (!launchRows) {
-      launchRows = '<p class="review-mod-note">缺少目标触达率/触达 UV 等列。</p>';
-    }
 
     const rev = pa ? toNum(val(pa, '总收入')) : null;
     const paidUv = pa ? toNum(val(pa, '付费抽卡用户数')) : null;
@@ -1999,7 +2079,6 @@
     const tgtUserShare = pyes ? rate01(val(pyes, '对应人群收入占比')) : null;
 
     const poolOl = '';
-    const launchOl = '';
 
     const miniGrid =
       '<div class="period-grid">' +
@@ -2133,22 +2212,21 @@
       buildUserReachFunnelsModuleHtml(sumRow) +
       '<div class="review-mod-grid">' +
       '<section class="review-mod">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">①</span> 抽池策略与收入结构</h3>' +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">②</span> 抽池策略与收入结构</h3>' +
       poolBlock +
       poolOl +
       '</section>' +
       '<section class="review-mod review-mod--promo">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">②</span> 宣发与触达</h3>' +
-      buildPromoReachSectionHtml(sumRow, n, pa, launchRows) +
-      launchOl +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">③</span> 当前抽池访问来源及贡献</h3>' +
+      buildAccessContributionSectionHtml(sumRow) +
       '</section>' +
       '</div>' +
       '<section class="review-mod review-mod--layer">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">③</span> 付费分层表现</h3>' +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 付费分层表现</h3>' +
       buildLayerModuleHtml(sumRow, state.layerIndex, n, pNo) +
       '</section>' +
       '<section class="review-mod review-mod--synthesis">' +
-      '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 综合判断（跨维度）</h3>' +
+      '<h3 class="review-mod-title"><span class="review-mod-badge">⑤</span> 综合判断（跨维度）</h3>' +
       buildComprehensiveVerdictHtml(pa, pyes, {
         linearEst,
         usedScript30,
@@ -2164,7 +2242,7 @@
       '</section>' +
       '</div>' +
       '<details class="period-metrics-fold">' +
-      '<summary class="period-metrics-fold-sum">展开 / 收起 ⑤ 六格指标明细</summary>' +
+      '<summary class="period-metrics-fold-sum">展开 / 收起 ⑥ 六格指标明细</summary>' +
       '' +
       miniGrid +
       '</details>' +
@@ -2478,7 +2556,7 @@
 
     return (
       `<section class="review-mod rv-funnelModule">` +
-      `<h3 class="review-mod-title"><span class="review-mod-badge">1</span>用户触达</h3>` +
+      `<h3 class="review-mod-title"><span class="review-mod-badge">①</span>用户触达</h3>` +
       insightHtml +
       `<div class="rv-funnel-grid">${funnelCardsHtml}</div>` +
       caliberHtml +
@@ -2714,6 +2792,7 @@
       state.layerRows = [];
       state.layerIndex = new Map();
       state.splitRows = [];
+      state.accessRows = [];
       state.workRows = [];
       state.topics = [];
       if (typeof window !== 'undefined') window.__WISH_REVIEW_BUNDLE_DATA__ = null;
@@ -2734,6 +2813,7 @@
     let benchKept = 0;
     let layerMerged = [];
     let splitMerged = [];
+    let accessMerged = [];
 
     try {
       if (parts) {
@@ -2777,6 +2857,12 @@
         csvScannedTotal += ingS.scanned;
         csvKeptBeforeDedupe += ingS.kept;
       }
+      if (isBundle && raw.access && raw.access.parts && raw.access.parts.length) {
+        const ingA = ingestSplitCsvParts(raw.access.parts, '访问贡献');
+        accessMerged = ingA.merged;
+        csvScannedTotal += ingA.scanned;
+        csvKeptBeforeDedupe += ingA.kept;
+      }
     } catch (e) {
       if (status) {
         status.hidden = false;
@@ -2795,6 +2881,7 @@
     state.layerRows = dedupeLayerRows(layerMerged);
     state.layerIndex = buildLayerRowIndex(state.layerRows);
     state.splitRows = dedupeTargetSplitRows(splitMerged);
+    state.accessRows = dedupeAccessRows(accessMerged);
     state.workRows = [];
 
     const lastMod = isBundle ? raw.lastModified || mainBlock.lastModified : mainBlock.lastModified;
@@ -2808,6 +2895,7 @@
         csvKeptBeforeDedupeRows: csvKeptBeforeDedupe,
         layerRowCount: state.layerRows.length,
         splitRowCount: state.splitRows.length,
+        accessRowCount: state.accessRows.length,
         workRowCount: 0,
         loadedAt: Date.now(),
         note: '',
