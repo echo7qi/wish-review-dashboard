@@ -59,11 +59,35 @@
   }
 
   function isSummaryAllRow(r) {
-    return (
-      val(r, '数据分类') === '汇总' &&
-      val(r, '数据周期') === '汇总' &&
-      val(r, '是否目标用户') === '全部'
-    );
+    if (val(r, '数据分类') !== '汇总') return false;
+    if (val(r, '数据周期') !== '汇总') return false;
+    // 兼容：部分汇总表不含「是否目标用户/目标用户类型」列，默认按「全部」处理
+    const u1 = String(val(r, '是否目标用户') || '').trim();
+    const u2 = String(val(r, '是否为目标用户') || '').trim();
+    const u3 = String(val(r, '目标用户类型') || '').trim();
+    if (!u1 && !u2 && !u3) return true;
+    return isAggregateTargetUserRow(r);
+  }
+
+  function extractOnlineDaysFromPeriod(periodRaw) {
+    const dp = String(periodRaw || '').trim();
+    if (!dp) return null;
+    const m = dp.match(/上线\s*(\d+)\s*日/);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    if (!Number.isFinite(n) || n < 1) return null;
+    return n;
+  }
+
+  function elapsedDaysFromLaunch(sumRow) {
+    const lk =
+      val(sumRow, '上线日期') || val(sumRow, '上线时间') || val(sumRow, '活动上线时间') || '';
+    const ts = parseLaunchDate(lk);
+    if (ts == null) return null;
+    const now = Date.now();
+    if (now <= ts) return 1;
+    const d = Math.floor((now - ts) / 86400000);
+    return Math.max(1, d);
   }
 
   /**
@@ -75,11 +99,8 @@
     if (isSummaryAllRow(r)) return true;
     if (val(r, '数据分类') !== '当前累计') return false;
     const dp = String(val(r, '数据周期') || '').trim();
-    const m = dp.match(/^上线(\d+)日内$/);
-    if (m) {
-      const n = parseInt(m[1], 10);
-      return n >= 1 && n <= MONITOR_SNAP_DAY_MAX;
-    }
+    const n = extractOnlineDaysFromPeriod(dp);
+    if (n != null) return n >= 1 && n <= MONITOR_SNAP_DAY_MAX;
     // 顶栏「累计触达用户数」依赖「当前累计·上线至今类·全量」行；此前仅保留上线 n 日内会导致该行从未入内存
     if (isLaunchToDateDataPeriod(dp) && isAggregateTargetUserRow(r)) return true;
     return false;
@@ -142,7 +163,13 @@
     const m = new Map();
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      m.set(rowDedupeKey(r), r);
+      const k = rowDedupeKey(r);
+      const prev = m.get(k);
+      if (!prev) { m.set(k, r); continue; }
+      // 同 key 保留上线天数更大的行（即数据更新的那条）
+      const dPrev = toNum(valFuzzy(prev, ['上线天数', '已上线天数'])) || 0;
+      const dCur = toNum(valFuzzy(r, ['上线天数', '已上线天数'])) || 0;
+      if (dCur >= dPrev) m.set(k, r);
     }
     return Array.from(m.values());
   }
@@ -242,26 +269,33 @@
   function normalizePrimarySourceName(raw) {
     const s = String(raw || '').trim();
     if (!s) return '';
-    if (s === '广告资源投放' || s === 'v2资源投放') return '运营资源投放';
+    const compact = s.replace(/[\s_\-—－]+/g, '').toLowerCase();
+    if (compact.includes('祈愿bar') || compact.includes('祈愿条')) return '祈愿bar';
+    if (compact.includes('漫画页') || compact.includes('漫画详情页')) return '漫画页';
+    if (compact.includes('卡片战斗') || compact.includes('卡牌战斗')) return '卡片战斗';
+    if (compact.includes('任务')) return '任务';
+    if (
+      compact.includes('广告资源投放') || compact.includes('广气资源投放') ||
+      compact === '广告资源' || compact === '广气资源' ||
+      compact.includes('v2资源投放') || compact === 'v2投放' || compact === 'v2资源'
+    ) return '运营资源投放';
     return s;
   }
 
+  const ACCESS_SOURCE_WHITELIST = ['祈愿bar', '漫画页', '运营资源投放', '任务', '卡片战斗'];
+
   function dedupeAccessRows(rows) {
-    const m = new Map();
+    const seen = new Set();
+    const out = [];
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      const project = String(
-        valFuzzy(r, ['活动名称【修正】', '活动名称【修正】 ', '活动名称', '专题名称']) || '',
-      ).trim();
-      const launchKey = normalizeDateKey(valFuzzy(r, ['上线时间', '上线日期', '活动上线时间']));
-      const source = normalizePrimarySourceName(
-        valFuzzy(r, ['一级来源', '来源一级', '访问一级来源', '来源']),
-      );
-      if (!project || !launchKey || !source) continue;
-      const k = [project, launchKey, source].join('\x01');
-      m.set(k, r);
+      if (!r || typeof r !== 'object') continue;
+      const k = JSON.stringify(r);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(r);
     }
-    return Array.from(m.values());
+    return out;
   }
 
   const LAYER_ORDER = [
@@ -446,8 +480,48 @@
   }
 
   function periodNum(row) {
+    const nTagged = parseInt(String((row && row.__periodNo) || '0'), 10);
+    if (Number.isFinite(nTagged) && nTagged > 0) return nTagged;
     const n = parseInt(String(val(row, '第x次祈愿') || '0'), 10);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  function parseTopicPeriodFromActivityName(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return { topicKey: '', periodKey: '' };
+    const parts = s
+      .split(/[\.。．]/)
+      .map((x) => String(x || '').trim())
+      .filter(Boolean);
+    return {
+      topicKey: parts.length ? parts[0] : '',
+      periodKey: parts.length > 1 ? parts[1] : '',
+    };
+  }
+
+  function periodStartDateKey(row) {
+    return (
+      normalizeDateKey(
+        valFuzzy(row, ['开始日期', '活动开始日期', '开始时间', '上线日期', '上线时间', '活动上线时间']),
+      ) || ''
+    );
+  }
+
+  // 同一期次存在多条汇总行时，优先选择「已上线天数」更大的记录（避免被早期2天数据覆盖8天数据）
+  function summaryRowPriority(row) {
+    const p = periodNum(row);
+    const dRaw = toNum(val(row, '已上线天数'));
+    const d = dRaw != null && Number.isFinite(dRaw) ? Math.floor(dRaw) : 0;
+    return { p, d };
+  }
+
+  function shouldReplaceSummary(prev, next) {
+    if (!prev) return true;
+    const a = summaryRowPriority(prev);
+    const b = summaryRowPriority(next);
+    if (b.p !== a.p) return b.p > a.p;
+    if (b.d !== a.d) return b.d > a.d;
+    return false;
   }
 
   function parseLaunchDate(raw) {
@@ -469,15 +543,16 @@
   }
 
   function snapAll(rows, aid, n) {
-    const key = `上线${n}日内`;
     const aidNorm = String(aid || '').trim();
     let allRow = null;
     let yesRow = null;
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (val(r, '活动标识') !== aidNorm || val(r, '数据分类') !== '当前累计' || val(r, '数据周期') !== key) {
+      if (val(r, '活动标识') !== aidNorm || val(r, '数据分类') !== '当前累计') {
         continue;
       }
+      const dn = extractOnlineDaysFromPeriod(val(r, '数据周期'));
+      if (dn == null || dn !== n) continue;
       if (isAggregateTargetUserRow(r)) allRow = r;
       if (aggregateTargetUserLabel(r) === '是') yesRow = r;
     }
@@ -488,8 +563,229 @@
     const mdRaw = Number(maxDays);
     let md = Math.floor(mdRaw);
     if (!Number.isFinite(mdRaw) || Number.isNaN(md) || md < 1) md = 1;
-    const n = Math.min(MONITOR_SNAP_DAY_MAX, md);
-    return snapAll(rows, aid, n);
+    let n = Math.min(MONITOR_SNAP_DAY_MAX, md);
+    let snap = snapAll(rows, aid, n);
+    if (snap.pa || snap.pyes) return snap;
+
+    // 若目标 n 不存在，回退到该活动可用的最大上线 n 日快照（避免显示全空）
+    const avail = inferAvailableMaxSnapDay(rows, aid);
+    if (avail != null && avail >= 1) {
+      n = Math.min(n, avail);
+      snap = snapAll(rows, aid, n);
+      if (snap.pa || snap.pyes) return snap;
+      // 再向下逐级回退，直到命中
+      for (let d = n - 1; d >= 1; d--) {
+        snap = snapAll(rows, aid, d);
+        if (snap.pa || snap.pyes) return snap;
+      }
+    }
+    return { pa: null, pyes: null, n };
+  }
+
+  function inferOnlineDaysFromRows(rows, aid) {
+    const aidNorm = String(aid || '').trim();
+    if (!aidNorm || !rows || !rows.length) return null;
+    let best = null;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (val(r, '活动标识') !== aidNorm) continue;
+      const cat = String(val(r, '数据分类') || '').trim();
+      if (!(cat === '当前累计' || cat.includes('当前累计'))) continue;
+      const per = String(val(r, '数据周期') || '').trim();
+      // 口径放宽：只要出现“上线 + 数字 + 日”即可（例如：上线8日内、上线 8 日、上线8日内（自然日））
+      const m = per.match(/上线\s*(\d+)\s*日/);
+      if (!m) continue;
+      const d = parseInt(m[1], 10);
+      if (!Number.isFinite(d) || d < 1) continue;
+      if (best == null || d > best) best = d;
+    }
+    return best;
+  }
+
+  function inferOnlineDaysByTopic(rows, sumRow) {
+    if (!rows || !rows.length || !sumRow) return null;
+    const topic = String(val(sumRow, '专题名称') || '').trim();
+    const actName = String(
+      val(sumRow, '活动名称【修正】') || val(sumRow, '活动名称') || '',
+    ).trim();
+    const curKeys = parseActivityNameKeys(actName);
+    const curPeriod = String(curKeys.periodKey || val(sumRow, '第x次祈愿') || '').trim();
+    if (!topic && !actName) return null;
+    let best = null;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const cat = String(val(r, '数据分类') || '').trim();
+      if (!(cat === '当前累计' || cat.includes('当前累计'))) continue;
+      const per = String(val(r, '数据周期') || '').trim();
+      const n = extractOnlineDaysFromPeriod(per);
+      if (n == null) continue;
+      const rTopic = String(val(r, '专题名称') || '').trim();
+      const rAct = String(val(r, '活动名称【修正】') || val(r, '活动名称') || '').trim();
+      const rKeys = parseActivityNameKeys(rAct);
+      const rPeriod = String(rKeys.periodKey || val(r, '第x次祈愿') || '').trim();
+      const sameTopic = topic && rTopic && rTopic === topic;
+      const sameAct = actName && rAct && rAct === actName;
+      if (!(sameTopic || sameAct)) continue;
+      if (curPeriod && rPeriod && curPeriod !== rPeriod) continue;
+      if (best == null || n > best) best = n;
+    }
+    return best;
+  }
+
+  function inferAvailableMaxSnapDay(rows, aid) {
+    const aidNorm = String(aid || '').trim();
+    if (!aidNorm || !rows || !rows.length) return null;
+    let best = null;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (val(r, '活动标识') !== aidNorm) continue;
+      if (val(r, '数据分类') !== '当前累计') continue;
+      const n = extractOnlineDaysFromPeriod(val(r, '数据周期'));
+      if (n == null) continue;
+      if (best == null || n > best) best = n;
+    }
+    return best;
+  }
+
+  function buildInferredOnlineDaysMap(rows) {
+    const m = new Map();
+    if (!rows || !rows.length) return m;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r || typeof r !== 'object') continue;
+      const cat = String(val(r, '数据分类') || '').trim();
+      if (!(cat === '当前累计' || cat.includes('当前累计'))) continue;
+      const aid = String(val(r, '活动标识') || '').trim();
+      if (!aid) continue;
+      const per = String(val(r, '数据周期') || '').trim();
+      const mm = per.match(/上线\s*(\d+)\s*日/);
+      if (!mm) continue;
+      const d = parseInt(mm[1], 10);
+      if (!Number.isFinite(d) || d < 1) continue;
+      const prev = m.get(aid);
+      if (prev == null || d > prev) m.set(aid, d);
+    }
+    return m;
+  }
+
+  function reconcileSummaryOnlineDays(rows) {
+    // 按活动标识取「当前累计」行中最大上线天数
+    // 来源1: 已上线天数/上线天数 字段
+    // 来源2: 数据周期「上线x日内」中的 x
+    const maxDaysMap = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const cat = String(val(r, '数据分类') || '').trim();
+      if (cat !== '当前累计' && !cat.includes('当前累计')) continue;
+      const aid = String(val(r, '活动标识') || '').trim();
+      if (!aid) continue;
+      let d = toNum(valFuzzy(r, ['已上线天数', '上线天数']));
+      if (d == null || !Number.isFinite(d) || d < 1) {
+        d = extractOnlineDaysFromPeriod(val(r, '数据周期'));
+      }
+      if (d == null || d < 1) continue;
+      const prev = maxDaysMap.get(aid);
+      if (prev == null || d > prev) maxDaysMap.set(aid, d);
+    }
+    if (!maxDaysMap.size) return;
+    // 回填汇总行
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!isSummaryAllRow(r)) continue;
+      const aid = String(val(r, '活动标识') || '').trim();
+      if (!aid || !maxDaysMap.has(aid)) continue;
+      const best = maxDaysMap.get(aid);
+      const cur = toNum(val(r, '已上线天数'));
+      if (cur == null || !Number.isFinite(cur) || best > cur) {
+        r['已上线天数'] = String(Math.floor(best));
+      }
+    }
+  }
+
+  function buildOnlineDaysIndex(rows) {
+    const byAidLaunch = new Map();
+    const byNameLaunch = new Map();
+    const byAid = new Map();
+    const byName = new Map();
+    if (!rows || !rows.length) return { byAidLaunch, byNameLaunch, byAid, byName };
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const cat = String(val(r, '数据分类') || '').trim();
+      if (cat !== '当前累计' && !cat.includes('当前累计')) continue;
+      if (!isAggregateTargetUserRow(r)) continue;
+      let d = toNum(valFuzzy(r, ['上线天数', '已上线天数']));
+      if (d == null || !Number.isFinite(d) || d < 1) {
+        d = extractOnlineDaysFromPeriod(val(r, '数据周期'));
+      }
+      if (d == null || !Number.isFinite(d) || d < 1) continue;
+      d = Math.floor(d);
+
+      const aid = String(val(r, '活动标识') || '').trim();
+      const name = String(
+        valFuzzy(r, ['活动名称【修正】', '活动名称【修正】 ', '活动名称', '专题名称']) || '',
+      ).trim();
+      const launch = normalizeDateKey(
+        valFuzzy(r, ['上线日期', '上线时间', '活动上线时间']),
+      );
+
+      if (aid && launch) {
+        const k = `${aid}\x01${launch}`;
+        const p = byAidLaunch.get(k);
+        if (p == null || d > p) byAidLaunch.set(k, d);
+      }
+      if (name && launch) {
+        const k = `${name}\x01${launch}`;
+        const p = byNameLaunch.get(k);
+        if (p == null || d > p) byNameLaunch.set(k, d);
+      }
+      if (aid) {
+        const p = byAid.get(aid);
+        if (p == null || d > p) byAid.set(aid, d);
+      }
+      if (name) {
+        const p = byName.get(name);
+        if (p == null || d > p) byName.set(name, d);
+      }
+    }
+    return { byAidLaunch, byNameLaunch, byAid, byName };
+  }
+
+  function resolveOnlineDays(sumRow) {
+    const fromSummaryRaw = toNum(val(sumRow, '已上线天数'));
+    const fromSummary =
+      fromSummaryRaw != null && Number.isFinite(fromSummaryRaw)
+        ? Math.max(1, Math.floor(fromSummaryRaw))
+        : null;
+    const aid = String(val(sumRow, '活动标识') || '').trim();
+    const name = String(
+      valFuzzy(sumRow, ['活动名称【修正】', '活动名称【修正】 ', '活动名称', '专题名称']) || '',
+    ).trim();
+    const launch = normalizeDateKey(
+      valFuzzy(sumRow, ['上线日期', '上线时间', '活动上线时间']),
+    );
+    let indexed = null;
+    const idx = state.onlineDaysIndex;
+    if (idx) {
+      if (aid && launch) {
+        const k = `${aid}\x01${launch}`;
+        if (idx.byAidLaunch.has(k)) indexed = idx.byAidLaunch.get(k);
+      }
+      if (indexed == null && name && launch) {
+        const k = `${name}\x01${launch}`;
+        if (idx.byNameLaunch.has(k)) indexed = idx.byNameLaunch.get(k);
+      }
+      if (indexed == null && aid && idx.byAid.has(aid)) indexed = idx.byAid.get(aid);
+      if (indexed == null && name && idx.byName.has(name)) indexed = idx.byName.get(name);
+    }
+    const elapsed = elapsedDaysFromLaunch(sumRow);
+    let resolved = fromSummary;
+    if (indexed != null && Number.isFinite(indexed)) {
+      resolved = resolved != null ? Math.max(resolved, indexed) : indexed;
+    }
+    if (elapsed != null) {
+      resolved = resolved != null ? Math.min(resolved, elapsed) : elapsed;
+    }
+    return resolved != null ? Math.max(1, resolved) : 1;
   }
 
   // ─── 30 日收入预估 + 同品类分位（与 生成_人鱼全期结论表.py 口径对齐）────────────────
@@ -524,7 +820,9 @@
       if (genreFilter != null && genreFilter !== '' && val(r, '品类') !== genreFilter) continue;
       if (topicFilter != null && topicFilter !== '' && val(r, '专题名称') !== topicFilter) continue;
       const aid = val(r, '活动标识');
-      if (aid) m.set(aid, r);
+      if (!aid) continue;
+      const prev = m.get(aid);
+      if (shouldReplaceSummary(prev, r)) m.set(aid, r);
     }
     return m;
   }
@@ -943,20 +1241,21 @@
     const summaries = rows.filter(isSummaryAllRow);
     const rawSummaryCount = summaries.length;
 
-    /** 专题名称 -> 活动标识 -> 行 */
+    /** 专题名(取x.x.x第1段) -> 期键(第2段+开始日期) -> 行 */
     const byTopic = new Map();
     for (let i = 0; i < summaries.length; i++) {
       const r = summaries[i];
-      const name = val(r, '专题名称');
+      const actName = val(r, '活动名称【修正】') || val(r, '活动名称') || '';
+      const parsed = parseTopicPeriodFromActivityName(actName);
+      const name = parsed.topicKey || val(r, '专题名称');
       if (!name) continue;
-      const aid = val(r, '活动标识');
-      if (!aid) continue;
+      const periodKey2 = parsed.periodKey || String(val(r, '第x次祈愿') || '').trim() || '未识别期';
+      const startKey = periodStartDateKey(r) || '未识别开始日期';
+      const periodIdentity = `${periodKey2}\x01${startKey}`;
       if (!byTopic.has(name)) byTopic.set(name, new Map());
       const m = byTopic.get(name);
-      const prev = m.get(aid);
-      if (!prev || periodNum(r) >= periodNum(prev)) {
-        m.set(aid, r);
-      }
+      const prev = m.get(periodIdentity);
+      if (shouldReplaceSummary(prev, r)) m.set(periodIdentity, r);
     }
 
     const topics = [];
@@ -968,14 +1267,29 @@
     byTopic.forEach((aidMap, name) => {
       const arr = Array.from(aidMap.values());
       activityDedupCount += arr.length;
-      arr.sort((a, b) => periodNum(b) - periodNum(a));
-      const latest = arr[0];
+
+      // 期次重排：按「开始日期」从早到晚定义第1期、第2期...
+      const asc = arr.slice().sort((a, b) => {
+        const ta = parseLaunchDate(periodStartDateKey(a)) || 0;
+        const tb = parseLaunchDate(periodStartDateKey(b)) || 0;
+        if (ta !== tb) return ta - tb;
+        const aa = val(a, '活动名称【修正】') || val(a, '活动名称') || '';
+        const bb = val(b, '活动名称【修正】') || val(b, '活动名称') || '';
+        const pa = parseTopicPeriodFromActivityName(aa).periodKey || '';
+        const pb = parseTopicPeriodFromActivityName(bb).periodKey || '';
+        return String(pa).localeCompare(String(pb));
+      });
+      for (let pi = 0; pi < asc.length; pi++) {
+        asc[pi].__periodNo = pi + 1;
+      }
+      const arrSorted = asc.slice().sort((a, b) => periodNum(b) - periodNum(a));
+      const latest = arrSorted[0];
       const launchMs = parseLaunchDate(val(latest, '上线日期'));
       const inThisWeek = launchMs != null && launchMs >= weekStart;
       const in7d = launchMs != null && launchMs >= sevenAgo;
       topics.push({
         name,
-        periods: arr,
+        periods: arrSorted,
         latest,
         launchMs,
         inThisWeek,
@@ -999,6 +1313,7 @@
     snapCacheMain: Object.create(null),
     snapCacheMerged: Object.create(null),
     modelPackByGenre: new Map(),
+    onlineDaysIndex: null,
     layerRows: [],
     layerIndex: new Map(),
     splitRows: [],
@@ -1606,8 +1921,7 @@
   /** 与本期 KPI 同口径：当前累计·上线 n 日内·全部 + 预估 30 日数值（用于环比） */
   function getKpiComparisonBase(sumRow) {
     const aid = val(sumRow, '活动标识');
-    const daysRaw = toNum(val(sumRow, '已上线天数'));
-    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 1;
+    const daysInt = resolveOnlineDays(sumRow);
     const snap = snapRowN(state.rows, aid, daysInt);
     const pa = snap.pa;
     const n = snap.n;
@@ -1721,26 +2035,17 @@
     },
   ];
 
-  function parseAccessContributionRow(r) {
-    const out = {};
-    for (let i = 0; i < ACCESS_METRIC_SPECS.length; i++) {
-      const s = ACCESS_METRIC_SPECS[i];
-      out[s.key] = {
-        share: rate01(valFuzzy(r, s.shareKeys)),
-        abs: toNum(valFuzzy(r, s.absKeys)),
-      };
-    }
-    return out;
-  }
-
   function buildProjectAccessPeriods(sumRow) {
     const project = String(
       val(sumRow, '活动名称【修正】') || val(sumRow, '活动名称') || val(sumRow, '专题名称') || '',
     ).trim();
     if (!project) return { project: '', current: null, previous: null, history: [], periods: [] };
     const currentLaunchKey = normalizeDateKey(val(sumRow, '上线日期'));
-    const periodMap = new Map();
     const rows = state.accessRows || [];
+    const whiteSet = new Set(ACCESS_SOURCE_WHITELIST);
+
+    // 第一步：收集所有匹配project且在白名单内的行，附带日期和上线时间
+    const matched = [];
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const rp = String(
@@ -1749,49 +2054,123 @@
       if (!rp || rp !== project) continue;
       const lk = normalizeDateKey(valFuzzy(r, ['上线时间', '上线日期', '活动上线时间']));
       if (!lk) continue;
-      const ts = parseLaunchDate(lk);
       const src = normalizePrimarySourceName(
-        valFuzzy(r, ['一级来源', '来源一级', '访问一级来源', '来源']),
+        String(valFuzzy(r, ['一级来源', '来源一级', '访问一级来源', '来源']) || ''),
       );
-      if (!src) continue;
-      let p = periodMap.get(lk);
-      if (!p) {
-        p = { launchKey: lk, launchTs: ts || 0, sources: new Map() };
-        periodMap.set(lk, p);
-      }
-      p.sources.set(src, parseAccessContributionRow(r));
+      if (!src || !whiteSet.has(src)) continue;
+      const rawDate = valFuzzy(r, ['日期', '统计日期', '数据日期']);
+      const dateKey = normalizeDateKey(rawDate) || lk;
+      matched.push({ r, lk, src, dateKey, ts: parseLaunchDate(lk) });
     }
-    const periods = Array.from(periodMap.values()).sort((a, b) => a.launchTs - b.launchTs);
+
+    // 第二步：按上线时间分组，每个上线时间内取最新日期的数据
+    const byLaunch = new Map();
+    for (let i = 0; i < matched.length; i++) {
+      const x = matched[i];
+      if (!byLaunch.has(x.lk)) byLaunch.set(x.lk, []);
+      byLaunch.get(x.lk).push(x);
+    }
+
+    const periodMap = new Map();
+    byLaunch.forEach(function (items, lk) {
+      // 统计该上线时间下有哪些不同的 dateKey
+      const dateSet = new Set();
+      for (let i = 0; i < items.length; i++) dateSet.add(items[i].dateKey);
+      let maxDate = '';
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].dateKey > maxDate) maxDate = items[i].dateKey;
+      }
+      const latest = items.filter(function (x) { return x.dateKey === maxDate; });
+
+      // 按 (一级来源, 来源后缀) 聚合同key候选，选取更贴近明细口径的一条（优先更小 visit）
+      const bySuffix = new Map();
+      function metricFromRow(row, keys) {
+        return toNum(valFuzzy(row, keys));
+      }
+      function isBetterCandidate(next, prev) {
+        if (!prev) return true;
+        const nVisit = metricFromRow(next.r, ['访问用户数', '访问UV', '访问人数', '访问量']);
+        const pVisit = metricFromRow(prev.r, ['访问用户数', '访问UV', '访问人数', '访问量']);
+        if (nVisit != null && pVisit != null && Number.isFinite(nVisit) && Number.isFinite(pVisit) && nVisit !== pVisit) {
+          return nVisit < pVisit;
+        }
+        const nDraw = metricFromRow(next.r, ['抽卡用户数', '抽卡人数', '抽卡UV']);
+        const pDraw = metricFromRow(prev.r, ['抽卡用户数', '抽卡人数', '抽卡UV']);
+        if (nDraw != null && pDraw != null && Number.isFinite(nDraw) && Number.isFinite(pDraw) && nDraw !== pDraw) {
+          return nDraw < pDraw;
+        }
+        return false;
+      }
+      for (let i = 0; i < latest.length; i++) {
+        var x = latest[i];
+        var suffix = String(valFuzzy(x.r, ['来源后缀', '来源标识']) || '').trim();
+        var dk = x.src + '\x01' + suffix;
+        var prev = bySuffix.get(dk);
+        if (!prev || isBetterCandidate(x, prev)) bySuffix.set(dk, x);
+      }
+      const deduped = Array.from(bySuffix.values());
+
+      console.log('[日期筛选] lk=' + lk + ' | 总行=' + items.length +
+        ' | 不同日期=' + Array.from(dateSet).sort().join(', ') +
+        ' | 取maxDate=' + maxDate + ' | 筛选后=' + latest.length +
+        ' | 后缀去重后=' + deduped.length);
+      for (var _di = 0; _di < deduped.length; _di++) {
+        var _dx = deduped[_di];
+        var _dsuffix = String(valFuzzy(_dx.r, ['来源后缀', '来源标识']) || '');
+        var _dsrc2 = String(valFuzzy(_dx.r, ['二级来源', '来源二级']) || '');
+        var _dv = toNum(valFuzzy(_dx.r, ['访问用户数', '访问UV', '访问人数', '访问量']));
+        console.log('  #' + _di + ' src=' + _dx.src + ' | suffix=' + _dsuffix +
+          ' | 二级=' + _dsrc2 + ' | visit=' + _dv + ' | dateKey=' + _dx.dateKey);
+      }
+
+      const ts = deduped.length ? deduped[0].ts : 0;
+      const p = { launchKey: lk, launchTs: ts || 0, sources: new Map() };
+      for (var i = 0; i < deduped.length; i++) {
+        var x = deduped[i];
+        if (!p.sources.has(x.src)) {
+          p.sources.set(x.src, { visit: 0, draw: 0, payDraw: 0, payAmt: 0 });
+        }
+        var bucket = p.sources.get(x.src);
+        var visit = toNum(valFuzzy(x.r, ['访问用户数', '访问UV', '访问人数', '访问量']));
+        var draw = toNum(valFuzzy(x.r, ['抽卡用户数', '抽卡人数', '抽卡UV']));
+        var payDraw = toNum(valFuzzy(x.r, ['付费抽卡用户数', '付费抽卡人数', '付费抽用户数']));
+        var payAmt = toNum(valFuzzy(x.r, ['付费金额', '付费收入', '收入金额', '累计付费金额', '累计付费收入']));
+        if (visit != null && Number.isFinite(visit)) visit = Math.round(visit);
+        if (draw != null && Number.isFinite(draw)) draw = Math.round(draw);
+        if (payDraw != null && Number.isFinite(payDraw)) payDraw = Math.round(payDraw);
+        if (visit != null && Number.isFinite(visit)) bucket.visit += visit;
+        if (draw != null && Number.isFinite(draw)) bucket.draw += draw;
+        if (payDraw != null && Number.isFinite(payDraw)) bucket.payDraw += payDraw;
+        if (payAmt != null && Number.isFinite(payAmt)) bucket.payAmt += payAmt;
+      }
+      periodMap.set(lk, p);
+    });
+
+    // 调试日志
+    console.group('[访问贡献数据匹配] project=' + project);
+    console.log('匹配行数:', matched.length);
+    periodMap.forEach(function (p, lk) {
+      console.log('上线时间=' + lk + ':');
+      p.sources.forEach(function (b, src) {
+        console.log(
+          '  source=' + src,
+          '| visit=' + b.visit, '| draw=' + b.draw,
+          '| payDraw=' + b.payDraw, '| payAmt=' + b.payAmt
+        );
+      });
+    });
+    console.groupEnd();
+
+    const periods = Array.from(periodMap.values()).sort(function (a, b) { return a.launchTs - b.launchTs; });
     if (!periods.length) return { project, current: null, previous: null, history: [], periods: [] };
     let current = periods[periods.length - 1];
     if (currentLaunchKey) {
-      const hit = periods.find((p) => p.launchKey === currentLaunchKey);
+      const hit = periods.find(function (p) { return p.launchKey === currentLaunchKey; });
       if (hit) current = hit;
     }
-    const curIdx = periods.findIndex((p) => p.launchKey === current.launchKey);
+    const curIdx = periods.findIndex(function (p) { return p.launchKey === current.launchKey; });
     const previous = curIdx > 0 ? periods[curIdx - 1] : null;
-    const history = periods.filter((p) => p.launchTs < current.launchTs);
-
-    for (let pi = 0; pi < periods.length; pi++) {
-      const period = periods[pi];
-      const srcNames = Array.from(period.sources.keys());
-      for (let mi = 0; mi < ACCESS_METRIC_SPECS.length; mi++) {
-        const mk = ACCESS_METRIC_SPECS[mi].key;
-        let totalAbs = 0;
-        for (let si = 0; si < srcNames.length; si++) {
-          const st = period.sources.get(srcNames[si])[mk];
-          if (st.abs != null && Number.isFinite(st.abs) && st.abs > 0) totalAbs += st.abs;
-        }
-        if (!(totalAbs > 0)) continue;
-        for (let si = 0; si < srcNames.length; si++) {
-          const st = period.sources.get(srcNames[si])[mk];
-          if (st.share == null || !Number.isFinite(st.share)) {
-            st.share = st.abs != null && Number.isFinite(st.abs) ? st.abs / totalAbs : null;
-          }
-        }
-      }
-    }
-
+    const history = periods.filter(function (p) { return p.launchTs < current.launchTs; });
     return { project, current, previous, history, periods };
   }
 
@@ -1868,79 +2247,72 @@
     );
   }
 
+  function fmtDeltaAbs(curr, prev) {
+    if (curr == null || !Number.isFinite(curr) || prev == null || !Number.isFinite(prev)) return '（—）';
+    const d = curr - prev;
+    const sign = d > 0 ? '+' : d < 0 ? '' : '';
+    return '（' + sign + fmtInt(d) + '）';
+  }
+
+  function buildSourceCompactCardHtml(source, curBucket, prevBucket) {
+    const metrics = [
+      { label: '访问用户数', k: 'visit' },
+      { label: '抽卡用户数', k: 'draw' },
+      { label: '付费抽卡用户数', k: 'payDraw' },
+      { label: '付费金额', k: 'payAmt' },
+    ];
+    let lines = '';
+    for (let i = 0; i < metrics.length; i++) {
+      const m = metrics[i];
+      const cur = curBucket ? curBucket[m.k] : null;
+      const prev = prevBucket ? prevBucket[m.k] : null;
+      lines +=
+        '<div class="promo-source-metric-line"><span>' + esc(m.label) +
+        '</span><strong>' + esc(cur != null && Number.isFinite(cur) ? fmtInt(Math.round(cur)) : '—') +
+        '</strong><em>' + esc(fmtDeltaAbs(cur, prev)) + '</em></div>';
+    }
+    return (
+      '<section class="promo-source-card">' +
+      '<h4 class="promo-source-card__title">' + esc(source) + '</h4>' +
+      lines +
+      '</section>'
+    );
+  }
+
   function buildAccessContributionSectionHtml(sumRow) {
     if (!state.accessRows || !state.accessRows.length) {
       return '<p class="review-mod-note">未读取到「访问贡献」文件夹内 CSV。</p>';
     }
     const grp = buildProjectAccessPeriods(sumRow);
     if (!grp.current) {
-      return '<p class="review-mod-note">访问贡献未匹配到当前项目（按「活动名称【修正】」+「上线时间/上线日期」）。</p>';
+      return '<p class="review-mod-note">访问贡献未匹配到当前项目（按「活动名称【修正】」+「上线时间」）。</p>';
     }
     const srcNames = Array.from(grp.current.sources.keys());
     if (!srcNames.length) {
       return '<p class="review-mod-note">访问贡献文件中未找到有效的「一级来源」行。</p>';
     }
-    const head =
-      '<p class="promo-reach-summary__p"><span class="promo-reach-summary__tag">口径</span>按「活动名称【修正】」归并同一项目；按上线时间区分不同期。一级来源中「广告资源投放」「v2资源投放」统一归类为「运营资源投放」。</p>';
+
     const periodMeta =
+      '<div class="promo-reach-summary">' +
+      '<p class="promo-reach-summary__p"><span class="promo-reach-summary__tag">口径</span>' +
+      '同一一级来源下所有二级来源的绝对值加总；当期值后括号展示相对上一期的绝对波动。</p>' +
       '<p class="promo-reach-summary__p">当前期上线时间 <strong>' +
       esc(grp.current.launchKey) +
-      '</strong>，可比历史期数 <strong>' +
-      esc(String(grp.history.length)) +
       '</strong>，上一期 <strong>' +
       esc(grp.previous ? grp.previous.launchKey : '—') +
-      '</strong>。</p>';
+      '</strong>。</p></div>';
 
-    const metricCards = [];
-    for (let mi = 0; mi < ACCESS_METRIC_SPECS.length; mi++) {
-      const spec = ACCESS_METRIC_SPECS[mi];
-      const arr = [];
-      for (let si = 0; si < srcNames.length; si++) {
-        const src = srcNames[si];
-        const cur = grp.current.sources.get(src)[spec.key].share;
-        if (cur == null || !Number.isFinite(cur)) continue;
-        const prev =
-          grp.previous && grp.previous.sources.get(src)
-            ? grp.previous.sources.get(src)[spec.key].share
-            : null;
-        const hist = avgShareFromHistory(grp.history, src, spec.key);
-        arr.push({ src, cur, prev, hist });
-      }
-      arr.sort((a, b) => b.cur - a.cur);
-      let rows = '';
-      for (let i = 0; i < arr.length; i++) {
-        const x = arr[i];
-        rows +=
-          '<div class="promo-source-row">' +
-          hbarHtml(x.src, x.cur, fmtPct(x.cur), spec.color) +
-          '<div class="promo-source-row__delta">' +
-          '<span>较上一期 ' +
-          esc(formatDeltaPp(x.prev != null ? x.cur - x.prev : null)) +
-          '</span>' +
-          '<span>较历史均值 ' +
-          esc(formatDeltaPp(x.hist != null ? x.cur - x.hist : null)) +
-          '</span>' +
-          '</div></div>';
-      }
-      metricCards.push(
-        '<section class="promo-source-card">' +
-          '<h4 class="promo-source-card__title">' +
-          esc(spec.label) +
-          '</h4>' +
-          (rows || '<p class="review-mod-note">当前期缺少该指标字段。</p>') +
-          '</section>',
-      );
-    }
+    const sourceCards = ACCESS_SOURCE_WHITELIST.map(function (source) {
+      const curBucket = grp.current.sources.get(source) || null;
+      const prevBucket = grp.previous && grp.previous.sources.get(source) ? grp.previous.sources.get(source) : null;
+      return buildSourceCompactCardHtml(source, curBucket, prevBucket);
+    }).join('');
 
     return (
       '<div class="promo-reach-default">' +
-      buildAccessSourceConclusion(grp.current, grp.previous, grp.history) +
-      '<div class="promo-reach-summary">' +
-      head +
       periodMeta +
-      '</div>' +
       '<div class="promo-source-grid">' +
-      metricCards.join('') +
+      sourceCards +
       '</div>' +
       '</div>'
     );
@@ -1949,15 +2321,14 @@
   function buildPeriodBoardArticle(sumRow) {
     const pNo = periodNum(sumRow);
     const aid = val(sumRow, '活动标识');
-    const daysRaw = toNum(val(sumRow, '已上线天数'));
-    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 1;
+    const daysInt = resolveOnlineDays(sumRow);
     const snap = snapRowN(state.rows, aid, daysInt);
     const pa = snap.pa;
     const pyes = snap.pyes;
     const n = snap.n;
     const genre = val(sumRow, '品类') || '—';
     const theme = val(sumRow, '活动名称【修正】') || val(sumRow, '活动名称') || '—';
-    const daysOnline = val(sumRow, '已上线天数') || '—';
+    const daysOnline = String(daysInt);
 
     const join = pa ? rate01(val(pa, '参与付费率')) : null;
     let freeShare = null;
@@ -2216,11 +2587,11 @@
       poolBlock +
       poolOl +
       '</section>' +
+      '</div>' +
       '<section class="review-mod review-mod--promo">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">③</span> 当前抽池访问来源及贡献</h3>' +
       buildAccessContributionSectionHtml(sumRow) +
       '</section>' +
-      '</div>' +
       '<section class="review-mod review-mod--layer">' +
       '<h3 class="review-mod-title"><span class="review-mod-badge">④</span> 付费分层表现</h3>' +
       buildLayerModuleHtml(sumRow, state.layerIndex, n, pNo) +
@@ -2429,8 +2800,7 @@
 
   function buildUserReachFunnelsModuleHtml(sumRow) {
     const aid = val(sumRow, '活动标识');
-    const daysRaw = toNum(val(sumRow, '已上线天数'));
-    const daysInt = daysRaw != null ? Math.floor(daysRaw) : 1;
+    const daysInt = resolveOnlineDays(sumRow);
     const snap = snapRowN(state.rows, aid, daysInt);
     const n = snap.n;
     const periodKey = `上线${n}日内`;
@@ -2445,7 +2815,8 @@
         const r = state.rows[i];
         if (val(r, '活动标识') !== aid) continue;
         if (val(r, '数据分类') !== '当前累计') continue;
-        if (val(r, '数据周期') !== periodKey) continue;
+        const dn = extractOnlineDaysFromPeriod(val(r, '数据周期'));
+        if (dn == null || dn !== n) continue;
         snapRows.push(r);
       }
       buildUserReachFunnelsModuleHtml._cache.set(cKey, snapRows);
@@ -2876,6 +3247,11 @@
     state.rows = dedupeMonitoringRows(mergedRows);
     state.benchRows = dedupeMonitoringRows(benchMerged);
     state.mergedRows = dedupeMonitoringRows(mergedRows.concat(benchMerged));
+    // 自动校准：若汇总行已上线天数落后于明细「上线n日内」最大口径，则回填为明细口径
+    reconcileSummaryOnlineDays(state.rows);
+    reconcileSummaryOnlineDays(state.benchRows);
+    reconcileSummaryOnlineDays(state.mergedRows);
+    state.onlineDaysIndex = buildOnlineDaysIndex(state.rows);
     state.snapCacheMain = buildSnapRevCache(state.rows);
     state.snapCacheMerged = buildSnapRevCache(state.mergedRows);
     state.layerRows = dedupeLayerRows(layerMerged);
