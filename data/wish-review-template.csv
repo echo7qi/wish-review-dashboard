@@ -1,0 +1,2 @@
+project_id,project_name,topic_id,topic_name,category,wish_id,wish_name,start_date,end_date,target_users,reached_target_users,reach_users_cum,paid_users,paid_draw_users,paid_draw_count,paid_revenue,revenue,review_notes
+proj_001,示例项目A,topic_spring,春日祈愿专题,古风,wish_2026_001,春樱初启,2026-03-01,2026-03-10,120000,69000,82000,4600,3900,35800,598000,628000,请替换为真实数据

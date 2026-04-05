@@ -1,0 +1,18 @@
+{
+  "name": "wish-review-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "祈愿单项目复盘线上看板",
+  "type": "module",
+  "scripts": {
+    "build-data": "node scripts/build-data.js --input ./data/sample-wish-review.csv --output ./data/dashboard-data.json",
+    "build-data:local": "node scripts/build-data.js --input ./local-data --output ./data/dashboard-data.json",
+    "build-data:wishboard": "node scripts/build-data.js --source-root \"/Users/wangqiqi/Downloads/祈愿看板\" --project-id wish_project --project-name \"祈愿项目\" --output ./data/dashboard-data.json",
+    "build": "npm run build-data",
+    "preview": "npx serve .",
+    "deploy": "./deploy.sh \"chore: publish wish review dashboard\""
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

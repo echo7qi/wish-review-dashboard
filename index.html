@@ -3,75 +3,74 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>祈愿单项目复盘看板（独立站点）</title>
-    <link rel="stylesheet" href="./styles.css?v=20260331b" />
-    <link rel="stylesheet" href="./wish-review-fish-layout.css?v=20260405a" />
+    <title>祈愿复盘看板</title>
+    <link rel="stylesheet" href="./styles.css?v=20260406a" />
   </head>
-  <body data-page="wish-review">
-    <div class="appShell">
-      <div class="appShell__content appShell__content--wishReview">
-        <div class="wishReviewTopbar" aria-label="数据与品牌">
-          <div class="wishReviewTopbar__brand">祈愿复盘看板</div>
-          <div class="wishReviewTopbar__bind">
-            <span class="wishReviewTopbar__bindLabel">数据绑定</span>
-            <button type="button" class="btn js-wish-review-bind">绑定数据文件夹</button>
-            <button type="button" class="btn btn--ghost js-wish-review-scan">扫描数据源</button>
-          </div>
+  <body>
+    <div class="page">
+      <header class="header">
+        <h1>祈愿单项目线上复盘看板</h1>
+        <p class="subTitle">
+          支持纵向（专题历史）与横向（品类分位）对比；数据来自本地构建后的
+          <code>data/dashboard-data.json</code>
+        </p>
+        <p id="dataVersion" class="dataVersion"></p>
+      </header>
+
+      <section class="panel filters">
+        <h2>筛选条件</h2>
+        <div class="filterGrid">
+          <label>
+            项目
+            <select id="filterProject"></select>
+          </label>
+          <label>
+            专题
+            <select id="filterTopic"></select>
+          </label>
+          <label>
+            品类
+            <select id="filterCategory"></select>
+          </label>
+          <label>
+            起始日期（>=）
+            <input id="filterFrom" type="date" />
+          </label>
+          <label>
+            起始日期（<=）
+            <input id="filterTo" type="date" />
+          </label>
+          <label>
+            当前祈愿
+            <select id="filterWish"></select>
+          </label>
         </div>
+      </section>
 
-        <header class="header">
-          <div class="header__title">
-            <h1>祈愿单项目复盘</h1>
-          </div>
-        </header>
+      <p id="loadingHint" class="loadingHint">正在加载数据...</p>
 
-        <main class="reviewEmbedMain reviewEmbedMain--dynamic">
-          <section class="wishReviewDash">
-            <div class="wishReviewDash__toolbar">
-              <input
-                type="search"
-                id="wishReviewTopicSearch"
-                class="wishReviewDash__search"
-                placeholder="按专题名称模糊搜索（监测表「专题名称」列）"
-                autocomplete="off"
-              />
-              <button type="button" class="btn" id="wishReviewReloadBtn">重新加载监测数据</button>
-              <span id="wishReviewDashStatus" class="wishReviewDash__status muted" hidden></span>
-              <span id="wishReviewDashSource" class="wishReviewDash__source muted" hidden></span>
-            </div>
+      <section class="panel">
+        <h2>当前祈愿关键资源</h2>
+        <div id="kpiGrid" class="kpiGrid"></div>
+      </section>
 
-            <div class="wishReviewDash__grid">
-              <div class="wishReviewDash__col wishReviewDash__col--list">
-                <div class="wishReviewDash__section">
-                  <h2 class="wishReviewDash__h">本周新上线（自然周·周一至今日）</h2>
-                  <div id="wishReviewWeekList" class="wishReviewDash__topicList"></div>
-                </div>
-                <div class="wishReviewDash__section">
-                  <h2 class="wishReviewDash__h">近 7 日新上线（不含已计入本周）</h2>
-                  <div id="wishReview7dList" class="wishReviewDash__topicList"></div>
-                </div>
-                <div class="wishReviewDash__section">
-                  <h2 class="wishReviewDash__h">全部专题（按最近上线排序）</h2>
-                  <div id="wishReviewAllList" class="wishReviewDash__topicList"></div>
-                </div>
-              </div>
+      <section class="panel">
+        <h2>纵向对比：当前专题历史祈愿</h2>
+        <div id="topicHistoryTable" class="tableWrap"></div>
+      </section>
 
-              <div class="wishReviewDash__col wishReviewDash__col--detail">
-                <div id="wishReviewDetail" class="wishReviewDash__detail card">
-                  <div id="wishReviewDetailInner" class="card__body">
-                    <p class="muted wishReviewDash__empty">加载中…</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </main>
-      </div>
+      <section class="panel">
+        <h2>横向对比：当前品类表现（P25 / P50 / P75）</h2>
+        <div id="categoryCompareTable" class="tableWrap"></div>
+      </section>
+
+      <section class="panel">
+        <h2>自动复盘摘要</h2>
+        <pre id="reviewText" class="reviewText"></pre>
+      </section>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-    <script src="./wish-review.js?v=20260406b"></script>
-    <script src="./wish-review-dynamic.js?v=20260406d"></script>
+    <script src="./app.js?v=20260406a"></script>
   </body>
 </html>
 
