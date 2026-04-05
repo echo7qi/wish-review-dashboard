@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>祈愿复盘看板</title>
-    <link rel="stylesheet" href="./styles.css?v=20260406a" />
+    <link rel="stylesheet" href="./styles.css?v=20260406b" />
   </head>
   <body>
     <div class="page">
@@ -17,60 +17,56 @@
         <p id="dataVersion" class="dataVersion"></p>
       </header>
 
-      <section class="panel filters">
-        <h2>筛选条件</h2>
-        <div class="filterGrid">
-          <label>
-            项目
-            <select id="filterProject"></select>
-          </label>
-          <label>
-            专题
-            <select id="filterTopic"></select>
-          </label>
-          <label>
-            品类
-            <select id="filterCategory"></select>
-          </label>
-          <label>
-            起始日期（>=）
-            <input id="filterFrom" type="date" />
-          </label>
-          <label>
-            起始日期（<=）
-            <input id="filterTo" type="date" />
-          </label>
-          <label>
-            当前祈愿
-            <select id="filterWish"></select>
-          </label>
-        </div>
-      </section>
+      <div class="dashboardLayout">
+        <aside class="panel topicAside">
+          <h2>专题列表</h2>
+          <input
+            id="topicSearch"
+            class="topicSearch"
+            type="search"
+            placeholder="按专题名称模糊搜索"
+            autocomplete="off"
+          />
 
-      <p id="loadingHint" class="loadingHint">正在加载数据...</p>
+          <div class="topicSection">
+            <h3>本周新上线（自然周·周一至今日）</h3>
+            <div id="weekTopicList" class="topicList"></div>
+          </div>
 
-      <section class="panel">
-        <h2>当前祈愿关键资源</h2>
-        <div id="kpiGrid" class="kpiGrid"></div>
-      </section>
+          <div class="topicSection">
+            <h3>全部专题（按最近上线排序）</h3>
+            <div id="allTopicList" class="topicList"></div>
+          </div>
+        </aside>
 
-      <section class="panel">
-        <h2>纵向对比：当前专题历史祈愿</h2>
-        <div id="topicHistoryTable" class="tableWrap"></div>
-      </section>
+        <main class="detailMain">
+          <p id="loadingHint" class="loadingHint">正在加载数据...</p>
 
-      <section class="panel">
-        <h2>横向对比：当前品类表现（P25 / P50 / P75）</h2>
-        <div id="categoryCompareTable" class="tableWrap"></div>
-      </section>
+          <section class="panel">
+            <div id="projectOverview" class="projectOverview"></div>
+            <div id="projectOneLineSummary" class="projectOneLineSummary"></div>
+            <div id="kpiGrid" class="kpiGrid"></div>
+          </section>
 
-      <section class="panel">
-        <h2>自动复盘摘要</h2>
-        <pre id="reviewText" class="reviewText"></pre>
-      </section>
+          <section class="panel">
+            <h2>纵向对比：当前专题历史祈愿</h2>
+            <div id="topicHistoryTable" class="tableWrap"></div>
+          </section>
+
+          <section class="panel">
+            <h2>横向对比：当前品类表现（P25 / P50 / P75）</h2>
+            <div id="categoryCompareTable" class="tableWrap"></div>
+          </section>
+
+          <section class="panel">
+            <h2>自动复盘摘要</h2>
+            <pre id="reviewText" class="reviewText"></pre>
+          </section>
+        </main>
+      </div>
     </div>
 
-    <script src="./app.js?v=20260406a"></script>
+    <script src="./app.js?v=20260406b"></script>
   </body>
 </html>
 
