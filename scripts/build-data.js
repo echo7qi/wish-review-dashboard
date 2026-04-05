@@ -203,6 +203,74 @@ function loadMergedRows(filePaths) {
   return rows;
 }
 
+const FOCUS_PRIMARY_SOURCE_ORDER = ['祈愿bar', '运营宣推', '漫画页', '卡片战斗', '任务'];
+
+function mapFocusPrimarySource(row) {
+  const primary = String(firstExisting(row, ['一级来源']) || '').trim();
+  if (!primary || primary === '--') return null;
+  if (primary === '祈愿bar') return '祈愿bar';
+  if (primary === '漫画页') return '漫画页';
+  if (primary === '卡片战斗') return '卡片战斗';
+  if (primary === '任务') return '任务';
+  if (primary.includes('广告_资源投放') || primary.includes('v2_资源投放') || primary.includes('运营资源投放')) {
+    return '运营宣推';
+  }
+  return null;
+}
+
+function buildAccessContributionByWish(rows) {
+  const byWish = new Map();
+  rows.forEach((r) => {
+    const wishId = String(firstExisting(r, ['活动标识', 'id']) || '').trim();
+    if (!wishId || wishId === '整体') return;
+    const dateStr = toDateStr(firstExisting(r, ['日期']));
+    if (!dateStr) return;
+    const cycle = String(firstExisting(r, ['统计周期']) || '').trim();
+    const cycleDim = String(firstExisting(r, ['周期维度']) || '').trim();
+    const level = cycle === '周' && cycleDim === '日均' ? 2 : 1;
+    const periodKey = `${String(level)}|${dateStr}`;
+    if (!byWish.has(wishId)) byWish.set(wishId, { bestPeriodKey: '', rowsByPeriod: {} });
+    const entry = byWish.get(wishId);
+    if (!entry.rowsByPeriod[periodKey]) entry.rowsByPeriod[periodKey] = [];
+    entry.rowsByPeriod[periodKey].push(r);
+    if (!entry.bestPeriodKey || periodKey > entry.bestPeriodKey) entry.bestPeriodKey = periodKey;
+  });
+
+  const out = {};
+  byWish.forEach((entry, wishId) => {
+    const bestPeriodKey = entry.bestPeriodKey;
+    const bestRows = bestPeriodKey ? entry.rowsByPeriod[bestPeriodKey] || [] : [];
+    const [levelRaw, dateStr] = bestPeriodKey.split('|');
+    const level = Number(levelRaw || 1);
+    const sourceMap = {};
+    FOCUS_PRIMARY_SOURCE_ORDER.forEach((source) => {
+      sourceMap[source] = {
+        source,
+        visit_users: 0,
+        draw_users: 0,
+        paid_draw_users: 0,
+        paid_revenue: 0,
+      };
+    });
+    bestRows.forEach((r) => {
+      const source = mapFocusPrimarySource(r);
+      if (!source) return;
+      sourceMap[source].visit_users += toNumber(firstExisting(r, ['访问用户数'])) || 0;
+      sourceMap[source].draw_users += toNumber(firstExisting(r, ['抽卡用户数'])) || 0;
+      sourceMap[source].paid_draw_users += toNumber(firstExisting(r, ['付费抽卡用户数'])) || 0;
+      sourceMap[source].paid_revenue += toNumber(firstExisting(r, ['付费金额'])) || 0;
+    });
+
+    const rows = FOCUS_PRIMARY_SOURCE_ORDER.map((source) => sourceMap[source]);
+    out[wishId] = {
+      stat_date: dateStr || '',
+      cycle: level === 2 ? '周-日均' : '最新日',
+      rows,
+    };
+  });
+  return out;
+}
+
 function buildRecordsFromWishBoardFolders(sourceRoot, opts = {}) {
   const projectId = opts.projectId || 'wish_project';
   const projectName = opts.projectName || '祈愿项目';
@@ -211,6 +279,10 @@ function buildRecordsFromWishBoardFolders(sourceRoot, opts = {}) {
   const summaryFiles = collectFilesInSubdir(sourceRoot, '汇总数据');
   const categoryRows = loadMergedRows(categoryFiles);
   const summaryRows = loadMergedRows(summaryFiles);
+  const accessFiles = fs.existsSync(path.resolve(sourceRoot, '抽池访问贡献'))
+    ? collectFilesInSubdir(sourceRoot, '抽池访问贡献')
+    : [];
+  const accessRows = accessFiles.length ? loadMergedRows(accessFiles) : [];
   const snapshotByWishDay = new Map();
 
   const categoryBestByWish = new Map();
@@ -344,12 +416,15 @@ function buildRecordsFromWishBoardFolders(sourceRoot, opts = {}) {
     };
   });
 
+  const accessByWish = buildAccessContributionByWish(accessRows);
+
   return {
     records,
-    sourceFiles: [...categoryFiles, ...summaryFiles],
+    sourceFiles: [...categoryFiles, ...summaryFiles, ...accessFiles],
     skipped,
     snapshots: {
       wish_day_metrics: wishDayMetrics,
+      access_primary_sources: accessByWish,
     },
   };
 }

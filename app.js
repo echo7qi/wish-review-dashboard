@@ -208,6 +208,34 @@ function compareBaseValue(selected, rows, metricKey) {
   return prev[metricKey];
 }
 
+function accessPackOf(wishId) {
+  if (!state.data || !state.data.snapshots || !state.data.snapshots.access_primary_sources) return null;
+  return state.data.snapshots.access_primary_sources[wishId] || null;
+}
+
+function sourceRowByName(pack, sourceName) {
+  if (!pack || !pack.rows) return null;
+  return pack.rows.find((x) => x.source === sourceName) || null;
+}
+
+function deltaClassByValue(v) {
+  if (v == null || Number.isNaN(v)) return 'kpiDelta--na';
+  if (v > 0) return 'kpiDelta--up';
+  if (v < 0) return 'kpiDelta--down';
+  return 'kpiDelta--flat';
+}
+
+function deltaTextByPair(current, base) {
+  if (current == null || base == null || Number(base) === 0) return '—';
+  const ratio = (Number(current) - Number(base)) / Number(base);
+  return fmtDeltaPct(ratio);
+}
+
+function metricRate(numerator, denominator) {
+  if (numerator == null || denominator == null || Number(denominator) === 0) return null;
+  return Number(numerator) / Number(denominator);
+}
+
 function onlineDaysSinceStart(startDate) {
   const ts = parseDate(startDate);
   if (ts == null) return null;
@@ -345,6 +373,171 @@ function renderKpis(selected) {
       },
     )
     .join('');
+}
+
+function renderPromoReach(selected, rows) {
+  const box = byId('promoReachPanel');
+  if (!selected) {
+    box.innerHTML = '<div class="empty">请选择左侧专题后查看宣发触达效率。</div>';
+    return;
+  }
+
+  const curPack = accessPackOf(selected.wish_id);
+  if (!curPack || !curPack.rows || !curPack.rows.length) {
+    box.innerHTML = '<div class="empty">暂无“抽池访问贡献”数据。</div>';
+    return;
+  }
+
+  const prevWish = previousWishInTopic(selected, rows);
+  const prevPack = prevWish ? accessPackOf(prevWish.wish_id) : null;
+  const header = `
+    <div class="promoHeader">
+      <div class="promoHeader__title">当前抽池访问来源及贡献</div>
+      <div class="promoHeader__note">重点来源：祈愿bar / 运营宣推 / 漫画页 / 卡片战斗 / 任务（二级来源已加和）。当前期上线时间 ${selected.start_date || '—'}，上一期 ${prevWish ? prevWish.start_date || '—' : '—'}。</div>
+    </div>
+  `;
+
+  const shareRows = (curPack.rows || []).map((r) => {
+    const curShare =
+      selected.reach_users_cum != null && Number(selected.reach_users_cum) > 0
+        ? Number(r.visit_users || 0) / Number(selected.reach_users_cum)
+        : null;
+    const prevRow = sourceRowByName(prevPack, r.source);
+    const prevVisit = prevRow ? Number(prevRow.visit_users || 0) : null;
+    const prevTotal =
+      prevPack && prevPack.rows
+        ? prevPack.rows.reduce((sum, x) => sum + (Number(x.visit_users || 0) || 0), 0)
+        : null;
+    const prevShare = prevTotal != null && prevTotal > 0 && prevVisit != null ? prevVisit / prevTotal : null;
+    const shareDelta =
+      curShare != null && prevShare != null ? ((curShare - prevShare) * 100).toFixed(1) : null;
+    const shareDeltaNum = shareDelta == null ? null : Number(shareDelta);
+    const shareDeltaClass = deltaClassByValue(shareDeltaNum);
+    return {
+      source: r.source,
+      curShare,
+      prevShare,
+      shareDelta,
+      shareDeltaClass,
+    };
+  });
+
+  const validShareRows = shareRows.filter((x) => x.shareDelta != null && Number.isFinite(Number(x.shareDelta)));
+  let insightText = '本期与上期来源结构暂无足够可比数据。';
+  if (validShareRows.length) {
+    const sorted = [...validShareRows].sort((a, b) => Number(b.shareDelta) - Number(a.shareDelta));
+    const up = sorted[0];
+    const down = sorted[sorted.length - 1];
+    const upTxt = `${up.source} +${Number(up.shareDelta).toFixed(1)}pp`;
+    const downTxt = `${down.source} ${Number(down.shareDelta).toFixed(1)}pp`;
+    insightText = `结构变化：提升最多 ${upTxt}；下滑最多 ${downTxt}。`;
+  }
+
+  const shareCompare = `
+    <div class="promoShareCompare">
+      <h4 class="promoShareCompare__title">一级来源贡献占比（本期 vs 上一期）</h4>
+      <p class="promoShareCompare__insight">${insightText}</p>
+      ${shareRows
+        .map((x) => {
+          const curPct = x.curShare == null ? '—' : fmtPct(x.curShare, 1);
+          const prevPct = x.prevShare == null ? '—' : fmtPct(x.prevShare, 1);
+          const curWidth = x.curShare == null ? 0 : Math.max(0, Math.min(100, x.curShare * 100));
+          const prevWidth = x.prevShare == null ? 0 : Math.max(0, Math.min(100, x.prevShare * 100));
+          const deltaText = x.shareDelta == null ? '—' : `${x.shareDelta > 0 ? '+' : ''}${x.shareDelta}pp`;
+          return `
+          <div class="shareRow">
+            <div class="shareRow__source">${x.source}</div>
+            <div class="shareRow__bars">
+              <div class="shareBar shareBar--cur"><span style="width:${curWidth}%"></span></div>
+              <div class="shareBar shareBar--prev"><span style="width:${prevWidth}%"></span></div>
+            </div>
+            <div class="shareRow__vals">
+              <span>本期 ${curPct}</span>
+              <span>上期 ${prevPct}</span>
+              <span class="kpiDelta ${x.shareDeltaClass}">${deltaText}</span>
+            </div>
+          </div>
+        `;
+        })
+        .join('')}
+    </div>
+  `;
+
+  const cards = curPack.rows
+    .map((r) => {
+      const visitShare =
+        selected.reach_users_cum != null && Number(selected.reach_users_cum) > 0
+          ? Number(r.visit_users || 0) / Number(selected.reach_users_cum)
+          : null;
+      const visitShareText = visitShare == null ? '—' : fmtPct(visitShare, 1);
+      const prevRow = sourceRowByName(prevPack, r.source);
+      const visitDeltaText = deltaTextByPair(r.visit_users, prevRow ? prevRow.visit_users : null);
+      const drawDeltaText = deltaTextByPair(r.draw_users, prevRow ? prevRow.draw_users : null);
+      const paidDrawDeltaText = deltaTextByPair(r.paid_draw_users, prevRow ? prevRow.paid_draw_users : null);
+      const revDeltaText = deltaTextByPair(r.paid_revenue, prevRow ? prevRow.paid_revenue : null);
+      const drawConv = metricRate(r.draw_users, r.visit_users);
+      const prevDrawConv = metricRate(prevRow ? prevRow.draw_users : null, prevRow ? prevRow.visit_users : null);
+      const drawConvDeltaText = deltaTextByPair(drawConv, prevDrawConv);
+      const paidDrawConv = metricRate(r.paid_draw_users, r.draw_users);
+      const prevPaidDrawConv = metricRate(
+        prevRow ? prevRow.paid_draw_users : null,
+        prevRow ? prevRow.draw_users : null,
+      );
+      const paidDrawConvDeltaText = deltaTextByPair(paidDrawConv, prevPaidDrawConv);
+      const visitClass = deltaClassByValue(visitDeltaText === '—' ? null : Number(visitDeltaText.replace('%', '')));
+      const drawClass = deltaClassByValue(drawDeltaText === '—' ? null : Number(drawDeltaText.replace('%', '')));
+      const paidDrawClass = deltaClassByValue(
+        paidDrawDeltaText === '—' ? null : Number(paidDrawDeltaText.replace('%', '')),
+      );
+      const revClass = deltaClassByValue(revDeltaText === '—' ? null : Number(revDeltaText.replace('%', '')));
+      const drawConvClass = deltaClassByValue(
+        drawConvDeltaText === '—' ? null : Number(drawConvDeltaText.replace('%', '')),
+      );
+      const paidDrawConvClass = deltaClassByValue(
+        paidDrawConvDeltaText === '—' ? null : Number(paidDrawConvDeltaText.replace('%', '')),
+      );
+      return {
+        source: r.source,
+        visitShare,
+        visitShareText,
+        visitDeltaText,
+        drawDeltaText,
+        paidDrawDeltaText,
+        revDeltaText,
+        drawConv,
+        drawConvDeltaText,
+        paidDrawConv,
+        paidDrawConvDeltaText,
+        visitClass,
+        drawClass,
+        paidDrawClass,
+        revClass,
+        drawConvClass,
+        paidDrawConvClass,
+        visit_users: r.visit_users,
+        draw_users: r.draw_users,
+        paid_draw_users: r.paid_draw_users,
+        paid_revenue: r.paid_revenue,
+      };
+    })
+    .map((item, idx, arr) => {
+      const maxShare = Math.max(...arr.map((x) => (x.visitShare == null ? -1 : x.visitShare)));
+      const isTop = item.visitShare != null && item.visitShare === maxShare && maxShare >= 0;
+      const cardClass = isTop ? 'promoCard promoCard--top' : 'promoCard';
+      return `
+      <article class="${cardClass}">
+        <h4>${item.source}<span class="promoSourceShare">（占比 ${item.visitShareText}）</span></h4>
+        <div class="promoRow"><span>访问用户数</span><strong>${fmtNumber(item.visit_users)}</strong><em class="kpiDelta ${item.visitClass}">（${item.visitDeltaText}）</em></div>
+        <div class="promoRow"><span>抽卡用户数</span><strong>${fmtNumber(item.draw_users)}</strong><em class="kpiDelta ${item.drawClass}">（${item.drawDeltaText}）</em></div>
+        <div class="promoRow"><span>付费抽卡用户数</span><strong>${fmtNumber(item.paid_draw_users)}</strong><em class="kpiDelta ${item.paidDrawClass}">（${item.paidDrawDeltaText}）</em></div>
+        <div class="promoRow"><span>付费金额</span><strong>${fmtNumber(item.paid_revenue, 2)}</strong><em class="kpiDelta ${item.revClass}">（${item.revDeltaText}）</em></div>
+        <div class="promoRow promoRow--rate"><span>抽卡转化率</span><strong>${fmtPct(item.drawConv, 1)}</strong><em class="kpiDelta ${item.drawConvClass}">（${item.drawConvDeltaText}）</em></div>
+        <div class="promoRow promoRow--rate"><span>付费抽卡转化率</span><strong>${fmtPct(item.paidDrawConv, 1)}</strong><em class="kpiDelta ${item.paidDrawConvClass}">（${item.paidDrawConvDeltaText}）</em></div>
+      </article>`;
+    })
+    .join('');
+
+  box.innerHTML = `${header}${shareCompare}<div class="promoGrid">${cards}</div>`;
 }
 
 function renderTopicHistory(selected, rows) {
@@ -502,6 +695,7 @@ function renderAll() {
   renderProjectOverview(selected, state.filtered);
   renderOneLineSummary(selected, state.filtered);
   renderKpis(selected);
+  renderPromoReach(selected, state.filtered);
   renderTopicHistory(selected, state.filtered);
   renderCategoryCompare(selected, state.filtered);
   renderReviewText(selected, state.filtered);
